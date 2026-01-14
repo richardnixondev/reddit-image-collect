@@ -131,6 +131,62 @@
             color: #818384;
             padding: 20px;
         }
+        .collector-section {
+            background: #272729;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .collector-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .collector-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #818384;
+        }
+        .status-dot.running {
+            background: #4caf50;
+            animation: pulse 1.5s infinite;
+        }
+        .status-dot.success {
+            background: #4caf50;
+        }
+        .status-dot.error {
+            background: #f44336;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .btn-run {
+            background: #0079d3;
+            color: white;
+            padding: 12px 24px;
+            font-size: 16px;
+        }
+        .btn-run:disabled {
+            background: #343536;
+            cursor: not-allowed;
+        }
+        .last-run {
+            font-size: 12px;
+            color: #818384;
+        }
         .inline-form {
             display: grid;
             grid-template-columns: 2fr 1fr 1fr auto;
@@ -154,6 +210,17 @@
     <h1>Reddit Image Collector</h1>
 
     <div id="alert" class="alert"></div>
+
+    <div class="collector-section">
+        <div class="collector-info">
+            <div class="collector-status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Idle</span>
+            </div>
+            <div class="last-run" id="last-run"></div>
+        </div>
+        <button class="btn-run" id="run-btn" onclick="runCollector()">Run Collector</button>
+    </div>
 
     <div class="container">
         <div class="section">
@@ -329,6 +396,71 @@
                 showAlert('Erro de conexao', 'error');
             }
         }
+
+        async function runCollector() {
+            const btn = document.getElementById('run-btn');
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/collector/run', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showAlert('Collector started!', 'success');
+                    updateStatus();
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Error starting collector', 'error');
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                showAlert('Connection error', 'error');
+                btn.disabled = false;
+            }
+        }
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/collector/status');
+                const data = await response.json();
+
+                const dot = document.getElementById('status-dot');
+                const text = document.getElementById('status-text');
+                const btn = document.getElementById('run-btn');
+                const lastRun = document.getElementById('last-run');
+
+                dot.className = 'status-dot';
+
+                if (data.running) {
+                    dot.classList.add('running');
+                    text.textContent = 'Running...';
+                    btn.disabled = true;
+                } else {
+                    btn.disabled = false;
+                    if (data.last_result === 'success') {
+                        dot.classList.add('success');
+                        text.textContent = 'Completed';
+                    } else if (data.last_result && data.last_result.startsWith('error')) {
+                        dot.classList.add('error');
+                        text.textContent = 'Error';
+                    } else {
+                        text.textContent = 'Idle';
+                    }
+                }
+
+                if (data.last_run) {
+                    const date = new Date(data.last_run);
+                    lastRun.textContent = 'Last run: ' + date.toLocaleString();
+                }
+            } catch (err) {
+                console.error('Failed to update status:', err);
+            }
+        }
+
+        // Update status every 5 seconds
+        setInterval(updateStatus, 5000);
+        updateStatus();
     </script>
 </body>
 </html>
