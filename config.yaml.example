@@ -1,0 +1,39 @@
+# Reddit Image Collector - Configuration
+# Copy this file to config.yaml and customize as needed
+# No Reddit API credentials required - uses public JSON endpoints
+
+targets:
+  # Subreddits to collect from
+  subreddits:
+    - name: "pics"
+      limit: 25
+      sort: "hot"  # hot, new, top, rising
+
+    - name: "earthporn"
+      limit: 50
+      sort: "top"
+      time_filter: "week"  # hour, day, week, month, year, all (only for "top" sort)
+
+  # Users to collect from (their submitted posts)
+  users: []
+    # - name: "example_user"
+    #   limit: 30
+
+download:
+  output_dir: "./downloads"
+  media_types:
+    - "image"
+    - "video"
+    - "gif"
+  min_score: 10          # Minimum upvotes to download
+  skip_nsfw: true        # Skip NSFW posts
+  max_file_size_mb: 100  # Skip files larger than this
+
+rate_limit:
+  # Be gentle! Public API has stricter limits than authenticated
+  requests_per_minute: 10   # Keep low to avoid 429 errors
+  download_delay_seconds: 2  # Delay between file downloads
+
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "collector.log"
