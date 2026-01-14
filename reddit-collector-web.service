@@ -1,0 +1,14 @@
+[Unit]
+Description=Reddit Image Collector Web Interface
+After=network.target
+
+[Service]
+Type=simple
+User=richard
+WorkingDirectory=/home/richard/reddit-image-collect
+ExecStart=/home/richard/reddit-image-collect/venv/bin/uvicorn src.web.app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
