@@ -1,8 +1,10 @@
 """FastAPI web application for managing Reddit Image Collector."""
 
+import asyncio
+import subprocess
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -12,6 +14,13 @@ from . import config_manager
 
 
 app = FastAPI(title="Reddit Image Collector", version="1.0.0")
+
+# Collector state
+collector_status = {
+    "running": False,
+    "last_run": None,
+    "last_result": None
+}
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -101,3 +110,44 @@ async def delete_user(name: str):
         raise HTTPException(status_code=404, detail="User not found")
 
     return {"message": f"User '{name}' removed successfully"}
+
+
+def run_collector():
+    """Run the collector in background."""
+    from datetime import datetime
+
+    collector_status["running"] = True
+    collector_status["last_run"] = datetime.now().isoformat()
+
+    try:
+        project_dir = Path(__file__).parent.parent.parent
+        result = subprocess.run(
+            ["python3", "-m", "src.main"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=14400  # 4 hours max
+        )
+        collector_status["last_result"] = "success" if result.returncode == 0 else "error"
+    except subprocess.TimeoutExpired:
+        collector_status["last_result"] = "timeout"
+    except Exception as e:
+        collector_status["last_result"] = f"error: {str(e)}"
+    finally:
+        collector_status["running"] = False
+
+
+@app.get("/api/collector/status")
+async def get_collector_status():
+    """Get collector status."""
+    return collector_status
+
+
+@app.post("/api/collector/run")
+async def trigger_collector(background_tasks: BackgroundTasks):
+    """Trigger the collector to run."""
+    if collector_status["running"]:
+        raise HTTPException(status_code=409, detail="Collector is already running")
+
+    background_tasks.add_task(run_collector)
+    return {"message": "Collector started"}
