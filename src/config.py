@@ -37,6 +37,7 @@ class DownloadConfig:
     max_file_size_mb: int = 100
     flat_structure: bool = True  # All files in single folder
     generate_sidecar: bool = True  # Generate .json sidecar for Immich
+    videos_only_from_favorites: bool = False  # Only download videos from favorited users
 
 
 @dataclass
@@ -54,6 +55,7 @@ class LoggingConfig:
 @dataclass
 class BlacklistConfig:
     authors: list[str] = field(default_factory=list)
+    subreddits: list[str] = field(default_factory=list)
     title_keywords: list[str] = field(default_factory=list)
     domains: list[str] = field(default_factory=list)
 
@@ -108,6 +110,7 @@ def load_config(config_path: str = "config.yaml") -> Config:
         max_file_size_mb=download_data.get("max_file_size_mb", 100),
         flat_structure=download_data.get("flat_structure", True),
         generate_sidecar=download_data.get("generate_sidecar", True),
+        videos_only_from_favorites=download_data.get("videos_only_from_favorites", False),
     )
 
     rate_data = data.get("rate_limit", {})
@@ -125,6 +128,7 @@ def load_config(config_path: str = "config.yaml") -> Config:
     blacklist_data = data.get("blacklist", {})
     blacklist = BlacklistConfig(
         authors=[a.lower() for a in blacklist_data.get("authors", [])],
+        subreddits=[s.lower() for s in blacklist_data.get("subreddits", [])],
         title_keywords=[k.lower() for k in blacklist_data.get("title_keywords", [])],
         domains=[d.lower() for d in blacklist_data.get("domains", [])],
     )
