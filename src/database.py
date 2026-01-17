@@ -56,6 +56,14 @@ class Database:
                     flair TEXT
                 )
             """)
+            # Favorites table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS favorites (
+                    post_id TEXT PRIMARY KEY,
+                    favorited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (post_id) REFERENCES posts(id)
+                )
+            """)
             # Add new columns if they don't exist (migration)
             try:
                 conn.execute("ALTER TABLE posts ADD COLUMN permalink TEXT")
@@ -407,4 +415,210 @@ class Database:
                 """,
                 authors_lower
             )
+            return cursor.fetchone()[0]
+
+    def get_posts_by_subreddits(self, subreddits: list[str]) -> list[PostRecord]:
+        """Get all downloaded posts from specific subreddits (case-insensitive)."""
+        if not subreddits:
+            return []
+
+        with self._get_connection() as conn:
+            placeholders = ','.join('?' * len(subreddits))
+            subreddits_lower = [s.lower() for s in subreddits]
+
+            cursor = conn.execute(
+                f"""
+                SELECT * FROM posts
+                WHERE LOWER(subreddit) IN ({placeholders})
+                  AND local_path IS NOT NULL
+                  AND downloaded_at IS NOT NULL
+                """,
+                subreddits_lower
+            )
+
+            posts = []
+            for row in cursor.fetchall():
+                posts.append(PostRecord(
+                    id=row["id"],
+                    subreddit=row["subreddit"],
+                    author=row["author"],
+                    title=row["title"],
+                    url=row["url"],
+                    media_url=row["media_url"],
+                    media_type=row["media_type"],
+                    score=row["score"],
+                    created_utc=row["created_utc"],
+                    downloaded_at=row["downloaded_at"],
+                    local_path=row["local_path"],
+                    file_hash=row["file_hash"],
+                    permalink=row["permalink"] if "permalink" in row.keys() else None,
+                    source_type=row["source_type"] if "source_type" in row.keys() else None,
+                    flair=row["flair"] if "flair" in row.keys() else None,
+                ))
+            return posts
+
+    def count_posts_by_subreddits(self, subreddits: list[str]) -> int:
+        """Count downloaded posts from specific subreddits (case-insensitive)."""
+        if not subreddits:
+            return 0
+
+        with self._get_connection() as conn:
+            placeholders = ','.join('?' * len(subreddits))
+            subreddits_lower = [s.lower() for s in subreddits]
+
+            cursor = conn.execute(
+                f"""
+                SELECT COUNT(*) FROM posts
+                WHERE LOWER(subreddit) IN ({placeholders})
+                  AND local_path IS NOT NULL
+                  AND downloaded_at IS NOT NULL
+                """,
+                subreddits_lower
+            )
+            return cursor.fetchone()[0]
+
+    # Favorites methods
+
+    def add_favorite(self, post_id: str) -> bool:
+        """Add a post to favorites. Returns True if added, False if already exists."""
+        with self._get_connection() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO favorites (post_id) VALUES (?)",
+                    (post_id,)
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def remove_favorite(self, post_id: str) -> bool:
+        """Remove a post from favorites. Returns True if removed."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM favorites WHERE post_id = ?",
+                (post_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def is_favorite(self, post_id: str) -> bool:
+        """Check if a post is favorited."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM favorites WHERE post_id = ?",
+                (post_id,)
+            )
+            return cursor.fetchone() is not None
+
+    def get_favorites(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Get all favorited posts with their info."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT p.id, p.subreddit, p.author, p.title, p.media_type,
+                       p.score, p.local_path, p.downloaded_at, p.permalink,
+                       p.created_utc, f.favorited_at
+                FROM favorites f
+                JOIN posts p ON f.post_id = p.id
+                ORDER BY f.favorited_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def count_favorites(self) -> int:
+        """Count total favorites."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM favorites")
+            return cursor.fetchone()[0]
+
+    def get_favorite_authors(self) -> list[str]:
+        """Get unique authors from favorited posts."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT DISTINCT p.author
+                FROM favorites f
+                JOIN posts p ON f.post_id = p.id
+                WHERE p.author IS NOT NULL
+                  AND p.author != '[deleted]'
+                  AND p.author != 'AutoModerator'
+                ORDER BY p.author
+                """
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    def get_media_by_authors(
+        self,
+        authors: list[str],
+        limit: int = 50,
+        offset: int = 0,
+        subreddit: str = None,
+        media_type: str = None
+    ) -> list[dict]:
+        """Get media files from specific authors."""
+        if not authors:
+            return []
+
+        with self._get_connection() as conn:
+            placeholders = ','.join('?' * len(authors))
+            authors_lower = [a.lower() for a in authors]
+
+            query = f"""
+                SELECT id, subreddit, author, title, media_type, score,
+                       local_path, downloaded_at, permalink, created_utc
+                FROM posts
+                WHERE LOWER(author) IN ({placeholders})
+                  AND local_path IS NOT NULL
+                  AND downloaded_at IS NOT NULL
+            """
+            params = list(authors_lower)
+
+            if subreddit:
+                query += " AND LOWER(subreddit) = ?"
+                params.append(subreddit.lower())
+
+            if media_type:
+                query += " AND media_type = ?"
+                params.append(media_type)
+
+            query += " ORDER BY downloaded_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def count_media_by_authors(
+        self,
+        authors: list[str],
+        subreddit: str = None,
+        media_type: str = None
+    ) -> int:
+        """Count media files from specific authors."""
+        if not authors:
+            return 0
+
+        with self._get_connection() as conn:
+            placeholders = ','.join('?' * len(authors))
+            authors_lower = [a.lower() for a in authors]
+
+            query = f"""
+                SELECT COUNT(*) FROM posts
+                WHERE LOWER(author) IN ({placeholders})
+                  AND local_path IS NOT NULL
+                  AND downloaded_at IS NOT NULL
+            """
+            params = list(authors_lower)
+
+            if subreddit:
+                query += " AND LOWER(subreddit) = ?"
+                params.append(subreddit.lower())
+
+            if media_type:
+                query += " AND media_type = ?"
+                params.append(media_type)
+
+            cursor = conn.execute(query, params)
             return cursor.fetchone()[0]
