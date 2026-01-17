@@ -38,6 +38,10 @@ def should_download_post(post: Post, config: Config) -> tuple[bool, str]:
     if post.author and post.author.lower() in config.blacklist.authors:
         return False, "blacklist_author"
 
+    # Check blacklist: subreddit
+    if post.subreddit and post.subreddit.lower() in config.blacklist.subreddits:
+        return False, "blacklist_subreddit"
+
     # Check blacklist: title keywords
     title_lower = post.title.lower() if post.title else ""
     for keyword in config.blacklist.title_keywords:
@@ -59,9 +63,21 @@ def is_domain_blacklisted(url: str, blacklist_domains: list[str]) -> bool:
     return False
 
 
-def should_download_media(media_type: str, config: Config) -> bool:
-    """Check if media type is allowed."""
-    return media_type in config.download.media_types
+def should_download_media(media_type: str, config: Config, author: str = None, db: Database = None) -> bool:
+    """Check if media type is allowed. For videos, optionally check if author is favorited."""
+    if media_type not in config.download.media_types:
+        return False
+
+    # If videos_only_from_favorites is enabled, check for video/gif
+    if config.download.videos_only_from_favorites and media_type in ("video", "gif"):
+        if not author or not db:
+            return False
+        # Check if author has any favorited posts
+        favorite_authors = db.get_favorite_authors()
+        if author.lower() not in [a.lower() for a in favorite_authors]:
+            return False
+
+    return True
 
 
 def process_post(
@@ -111,8 +127,8 @@ def process_post(
             logger.debug(f"Skipping {item_id}: already in database")
             continue
 
-        # Check media type filter
-        if not should_download_media(media_type, config):
+        # Check media type filter (including videos_only_from_favorites)
+        if not should_download_media(media_type, config, post.author, db):
             stats.skipped_type += 1
             logger.debug(f"Skipping {item_id}: media type {media_type} not allowed")
             continue
@@ -242,12 +258,12 @@ def print_report(stats: CollectionStats, db: Database, logger) -> None:
     logger.info(f"Total in database: {db_stats['total_posts']}")
     logger.info(f"Total downloaded: {db_stats['downloaded']}")
 
-    if db_stats["by_subreddit"]:
-        logger.info("By subreddit:")
-        for sub, count in sorted(db_stats["by_subreddit"].items()):
-            logger.info(f"  r/{sub}: {count}")
+    if db_stats.get("by_source"):
+        logger.info("By source:")
+        for source, count in sorted(db_stats["by_source"].items()):
+            logger.info(f"  {source}: {count}")
 
-    if db_stats["by_type"]:
+    if db_stats.get("by_type"):
         logger.info("By type:")
         for mtype, count in sorted(db_stats["by_type"].items()):
             logger.info(f"  {mtype}: {count}")
