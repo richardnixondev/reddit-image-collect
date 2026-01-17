@@ -120,8 +120,8 @@ def remove_user(name: str) -> bool:
 def _ensure_blacklist(config: dict) -> dict:
     """Ensure blacklist structure exists in config."""
     if "blacklist" not in config:
-        config["blacklist"] = {"authors": [], "title_keywords": [], "domains": []}
-    for key in ["authors", "title_keywords", "domains"]:
+        config["blacklist"] = {"authors": [], "subreddits": [], "title_keywords": [], "domains": []}
+    for key in ["authors", "subreddits", "title_keywords", "domains"]:
         if key not in config["blacklist"]:
             config["blacklist"][key] = []
     return config
@@ -135,7 +135,7 @@ def get_blacklist() -> dict[str, list[str]]:
 
 
 def add_blacklist_author(author: str) -> bool:
-    """Add an author to the blacklist."""
+    """Add an author to the blacklist and remove from users collection."""
     config = load_config()
     config = _ensure_blacklist(config)
 
@@ -144,6 +144,14 @@ def add_blacklist_author(author: str) -> bool:
         return False
 
     config["blacklist"]["authors"].append(author)
+
+    # Also remove from users collection if present
+    if "targets" in config and "users" in config["targets"]:
+        config["targets"]["users"] = [
+            u for u in config["targets"]["users"]
+            if u.get("name", "").lower() != author.lower()
+        ]
+
     save_config(config)
     return True
 
@@ -159,6 +167,44 @@ def remove_blacklist_author(author: str) -> bool:
     ]
 
     if len(config["blacklist"]["authors"]) < original_len:
+        save_config(config)
+        return True
+    return False
+
+
+def add_blacklist_subreddit(subreddit: str) -> bool:
+    """Add a subreddit to the blacklist and remove from subreddits collection."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    # Check if already exists (case-insensitive)
+    if any(s.lower() == subreddit.lower() for s in config["blacklist"]["subreddits"]):
+        return False
+
+    config["blacklist"]["subreddits"].append(subreddit)
+
+    # Also remove from subreddits collection if present
+    if "targets" in config and "subreddits" in config["targets"]:
+        config["targets"]["subreddits"] = [
+            s for s in config["targets"]["subreddits"]
+            if s.get("name", "").lower() != subreddit.lower()
+        ]
+
+    save_config(config)
+    return True
+
+
+def remove_blacklist_subreddit(subreddit: str) -> bool:
+    """Remove a subreddit from the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    original_len = len(config["blacklist"]["subreddits"])
+    config["blacklist"]["subreddits"] = [
+        s for s in config["blacklist"]["subreddits"] if s.lower() != subreddit.lower()
+    ]
+
+    if len(config["blacklist"]["subreddits"]) < original_len:
         save_config(config)
         return True
     return False
