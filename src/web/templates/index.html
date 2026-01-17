@@ -681,7 +681,12 @@
         </div>
 
         <div class="blacklist-section">
-            <h2 style="color: #ff4500; margin-bottom: 20px;">Blacklist</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="color: #ff4500; margin: 0; border: none; padding: 0;">Blacklist</h2>
+                <button class="btn-delete" id="cleanup-blacklist-btn" onclick="cleanupBlacklist()" style="padding: 10px 20px;">
+                    Limpar Midias de Blacklistados
+                </button>
+            </div>
             <div class="blacklist-grid">
                 <div class="blacklist-card">
                     <h3>Autores Bloqueados ({{ blacklist.authors|length }})</h3>
@@ -863,14 +868,15 @@
                 container.innerHTML = recent.map(item => {
                     const filename = item.local_path ? item.local_path.split('/').pop() : '';
                     const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
-                    const thumbSrc = isVideo ? '' : `/api/media/file/${filename}`;
+                    // Use thumbnail endpoint for videos
+                    const thumbSrc = isVideo
+                        ? `/api/media/thumb/${filename}`
+                        : `/api/media/file/${filename}`;
 
                     return `
                         <div class="recent-item">
-                            ${isVideo ?
-                                '<div class="recent-thumb" style="display:flex;align-items:center;justify-content:center;">🎬</div>' :
-                                `<img class="recent-thumb" src="${thumbSrc}" onerror="this.style.display='none'">`
-                            }
+                            <img class="recent-thumb" src="${thumbSrc}"
+                                onerror="this.outerHTML='<div class=\\'recent-thumb\\' style=\\'display:flex;align-items:center;justify-content:center;\\'>${isVideo ? '🎬' : '🖼️'}</div>'">
                             <div class="recent-info">
                                 <div class="recent-title">${item.title || 'Sem titulo'}</div>
                                 <div class="recent-meta">r/${item.subreddit} • ${item.media_type} • Score: ${item.score}</div>
@@ -1106,6 +1112,60 @@
             }
         }
 
+        async function cleanupBlacklist() {
+            const btn = document.getElementById('cleanup-blacklist-btn');
+            btn.disabled = true;
+            btn.textContent = 'Verificando...';
+
+            try {
+                // First, get preview of how many files will be deleted
+                const previewResponse = await fetch('/api/media/blacklist-preview');
+                const preview = await previewResponse.json();
+
+                btn.disabled = false;
+                btn.textContent = 'Limpar Midias de Blacklistados';
+
+                if (preview.count === 0) {
+                    showAlert('Nenhuma midia de autores blacklistados encontrada.', 'success');
+                    return;
+                }
+
+                const authorsList = preview.authors.slice(0, 5).map(a => `u/${a}`).join(', ');
+                const moreAuthors = preview.authors.length > 5 ? ` e mais ${preview.authors.length - 5}` : '';
+
+                const confirmed = confirm(
+                    `Encontradas ${preview.count} midias de autores blacklistados:\n\n` +
+                    `Autores: ${authorsList}${moreAuthors}\n\n` +
+                    `Deseja deletar TODAS essas midias permanentemente?\n\n` +
+                    `Esta acao NAO pode ser desfeita!`
+                );
+
+                if (!confirmed) return;
+
+                btn.disabled = true;
+                btn.textContent = 'Deletando...';
+
+                const response = await fetch('/api/media/cleanup-blacklist', {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showAlert(`${result.deleted} arquivos deletados com sucesso!`, 'success');
+                    loadStats();
+                    loadRecentDownloads();
+                } else {
+                    showAlert(result.detail || 'Erro ao limpar blacklistados', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Limpar Midias de Blacklistados';
+            }
+        }
+
         // Collector functions
         async function runCollector() {
             const btn = document.getElementById('run-btn');
@@ -1214,12 +1274,21 @@
                 const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
                 const isGif = item.media_type === 'gif' || filename.endsWith('.gif');
 
+                // For videos, use thumbnail endpoint with fallback to emoji
+                const thumbSrc = isVideo
+                    ? `/api/media/thumb/${filename}`
+                    : `/api/media/file/${filename}`;
+
                 return `
                     <div class="gallery-item" onclick='openModal(${JSON.stringify(item).replace(/'/g, "\\'")})'>
-                        ${isVideo ?
-                            '<div class="gallery-thumb" style="display:flex;align-items:center;justify-content:center;font-size:48px;">🎬</div>' :
-                            `<img class="gallery-thumb" src="/api/media/file/${filename}" loading="lazy" onerror="this.parentElement.style.display='none'">`
-                        }
+                        <div class="gallery-thumb-container" style="position:relative;">
+                            <img class="gallery-thumb" src="${thumbSrc}" loading="lazy"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="gallery-thumb" style="display:none;align-items:center;justify-content:center;font-size:48px;">
+                                ${isVideo ? '🎬' : '🖼️'}
+                            </div>
+                            ${isVideo ? '<div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px;font-size:11px;">VIDEO</div>' : ''}
+                        </div>
                         <div class="gallery-info">
                             <div class="gallery-title">${item.title || 'Sem titulo'}</div>
                             <div class="gallery-meta">r/${item.subreddit} • ${item.media_type}</div>
@@ -1283,6 +1352,9 @@
         async function deleteMedia(postId) {
             if (!confirm('Deletar este arquivo permanentemente?')) return;
 
+            // Guardar info do autor antes de deletar
+            const author = currentItem ? currentItem.author : null;
+
             try {
                 const response = await fetch(`/api/media/${encodeURIComponent(postId)}`, {
                     method: 'DELETE'
@@ -1294,12 +1366,43 @@
                     loadGallery();
                     loadStats();
                     loadRecentDownloads();
+
+                    // Sugerir adicionar autor na blacklist
+                    if (author && author !== 'deleted' && author !== '[deleted]') {
+                        const addToBlacklist = confirm(`Deseja adicionar u/${author} na blacklist?\n\nIsso impedira que novas midias deste usuario sejam baixadas.`);
+                        if (addToBlacklist) {
+                            await addAuthorToBlacklist(author);
+                        }
+                    }
                 } else {
                     const data = await response.json();
                     showAlert(data.detail || 'Erro ao deletar', 'error');
                 }
             } catch (err) {
                 showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        async function addAuthorToBlacklist(author) {
+            try {
+                const response = await fetch('/api/blacklist/authors', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({value: author})
+                });
+
+                if (response.ok) {
+                    showAlert(`u/${author} adicionado a blacklist!`, 'success');
+                } else {
+                    const data = await response.json();
+                    if (response.status === 409) {
+                        showAlert(`u/${author} ja esta na blacklist`, 'success');
+                    } else {
+                        showAlert(data.detail || 'Erro ao adicionar na blacklist', 'error');
+                    }
+                }
+            } catch (err) {
+                showAlert('Erro ao adicionar na blacklist', 'error');
             }
         }
 
