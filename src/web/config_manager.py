@@ -113,3 +113,118 @@ def remove_user(name: str) -> bool:
         save_config(config)
         return True
     return False
+
+
+# Blacklist functions
+
+def _ensure_blacklist(config: dict) -> dict:
+    """Ensure blacklist structure exists in config."""
+    if "blacklist" not in config:
+        config["blacklist"] = {"authors": [], "title_keywords": [], "domains": []}
+    for key in ["authors", "title_keywords", "domains"]:
+        if key not in config["blacklist"]:
+            config["blacklist"][key] = []
+    return config
+
+
+def get_blacklist() -> dict[str, list[str]]:
+    """Get the full blacklist configuration."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+    return config["blacklist"]
+
+
+def add_blacklist_author(author: str) -> bool:
+    """Add an author to the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    # Check if already exists (case-insensitive)
+    if any(a.lower() == author.lower() for a in config["blacklist"]["authors"]):
+        return False
+
+    config["blacklist"]["authors"].append(author)
+    save_config(config)
+    return True
+
+
+def remove_blacklist_author(author: str) -> bool:
+    """Remove an author from the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    original_len = len(config["blacklist"]["authors"])
+    config["blacklist"]["authors"] = [
+        a for a in config["blacklist"]["authors"] if a.lower() != author.lower()
+    ]
+
+    if len(config["blacklist"]["authors"]) < original_len:
+        save_config(config)
+        return True
+    return False
+
+
+def add_blacklist_keyword(keyword: str) -> bool:
+    """Add a title keyword to the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    # Check if already exists (case-insensitive)
+    if any(k.lower() == keyword.lower() for k in config["blacklist"]["title_keywords"]):
+        return False
+
+    config["blacklist"]["title_keywords"].append(keyword)
+    save_config(config)
+    return True
+
+
+def remove_blacklist_keyword(keyword: str) -> bool:
+    """Remove a title keyword from the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    original_len = len(config["blacklist"]["title_keywords"])
+    config["blacklist"]["title_keywords"] = [
+        k for k in config["blacklist"]["title_keywords"] if k.lower() != keyword.lower()
+    ]
+
+    if len(config["blacklist"]["title_keywords"]) < original_len:
+        save_config(config)
+        return True
+    return False
+
+
+def add_blacklist_domain(domain: str) -> bool:
+    """Add a domain to the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    # Normalize domain (remove protocol if present)
+    domain = domain.lower().replace("https://", "").replace("http://", "").strip("/")
+
+    # Check if already exists
+    if domain in config["blacklist"]["domains"]:
+        return False
+
+    config["blacklist"]["domains"].append(domain)
+    save_config(config)
+    return True
+
+
+def remove_blacklist_domain(domain: str) -> bool:
+    """Remove a domain from the blacklist."""
+    config = load_config()
+    config = _ensure_blacklist(config)
+
+    # Normalize domain
+    domain = domain.lower().replace("https://", "").replace("http://", "").strip("/")
+
+    original_len = len(config["blacklist"]["domains"])
+    config["blacklist"]["domains"] = [
+        d for d in config["blacklist"]["domains"] if d != domain
+    ]
+
+    if len(config["blacklist"]["domains"]) < original_len:
+        save_config(config)
+        return True
+    return False

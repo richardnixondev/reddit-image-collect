@@ -223,16 +223,37 @@ class Database:
             downloaded = conn.execute(
                 "SELECT COUNT(*) FROM posts WHERE downloaded_at IS NOT NULL"
             ).fetchone()[0]
-            by_subreddit = dict(
-                conn.execute(
-                    """
-                    SELECT subreddit, COUNT(*)
-                    FROM posts
-                    WHERE downloaded_at IS NOT NULL
-                    GROUP BY subreddit
-                    """
-                ).fetchall()
-            )
+
+            # Group by source: subreddits as "r/name", users as "u/name"
+            by_source = {}
+
+            # Downloads from subreddits
+            subreddit_counts = conn.execute(
+                """
+                SELECT subreddit, COUNT(*)
+                FROM posts
+                WHERE downloaded_at IS NOT NULL
+                  AND (source_type = 'subreddit' OR source_type IS NULL)
+                GROUP BY subreddit
+                """
+            ).fetchall()
+            for name, count in subreddit_counts:
+                by_source[f"r/{name}"] = count
+
+            # Downloads from users (group by author)
+            user_counts = conn.execute(
+                """
+                SELECT author, COUNT(*)
+                FROM posts
+                WHERE downloaded_at IS NOT NULL
+                  AND source_type = 'user'
+                  AND author IS NOT NULL
+                GROUP BY author
+                """
+            ).fetchall()
+            for name, count in user_counts:
+                by_source[f"u/{name}"] = count
+
             by_type = dict(
                 conn.execute(
                     """
@@ -247,6 +268,81 @@ class Database:
         return {
             "total_posts": total,
             "downloaded": downloaded,
-            "by_subreddit": by_subreddit,
+            "by_source": by_source,
             "by_type": by_type,
         }
+
+    def get_recent_downloads(self, limit: int = 10) -> list[dict]:
+        """Get most recent downloads."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, subreddit, author, title, media_type, score,
+                       local_path, downloaded_at, permalink
+                FROM posts
+                WHERE downloaded_at IS NOT NULL AND local_path IS NOT NULL
+                ORDER BY downloaded_at DESC
+                LIMIT ?
+                """,
+                (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_media_files(self, limit: int = 50, offset: int = 0,
+                        subreddit: str = None, media_type: str = None) -> list[dict]:
+        """Get media files with optional filtering."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT id, subreddit, author, title, media_type, score,
+                       local_path, downloaded_at, permalink, created_utc
+                FROM posts
+                WHERE downloaded_at IS NOT NULL AND local_path IS NOT NULL
+            """
+            params = []
+
+            if subreddit:
+                query += " AND LOWER(subreddit) = LOWER(?)"
+                params.append(subreddit)
+
+            if media_type:
+                query += " AND media_type = ?"
+                params.append(media_type)
+
+            query += " ORDER BY downloaded_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_total_media_count(self, subreddit: str = None, media_type: str = None) -> int:
+        """Get total count of media files with optional filtering."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT COUNT(*)
+                FROM posts
+                WHERE downloaded_at IS NOT NULL AND local_path IS NOT NULL
+            """
+            params = []
+
+            if subreddit:
+                query += " AND LOWER(subreddit) = LOWER(?)"
+                params.append(subreddit)
+
+            if media_type:
+                query += " AND media_type = ?"
+                params.append(media_type)
+
+            return conn.execute(query, params).fetchone()[0]
+
+    def get_all_subreddits(self) -> list[str]:
+        """Get list of all subreddits with downloaded content."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT DISTINCT subreddit
+                FROM posts
+                WHERE downloaded_at IS NOT NULL
+                ORDER BY subreddit
+                """
+            )
+            return [row[0] for row in cursor.fetchall()]

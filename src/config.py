@@ -52,11 +52,19 @@ class LoggingConfig:
 
 
 @dataclass
+class BlacklistConfig:
+    authors: list[str] = field(default_factory=list)
+    title_keywords: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Config:
     targets: TargetsConfig
     download: DownloadConfig
     rate_limit: RateLimitConfig
     logging: LoggingConfig
+    blacklist: BlacklistConfig = field(default_factory=BlacklistConfig)
 
 
 def load_config(config_path: str = "config.yaml") -> Config:
@@ -114,11 +122,19 @@ def load_config(config_path: str = "config.yaml") -> Config:
         file=log_data.get("file", "collector.log"),
     )
 
+    blacklist_data = data.get("blacklist", {})
+    blacklist = BlacklistConfig(
+        authors=[a.lower() for a in blacklist_data.get("authors", [])],
+        title_keywords=[k.lower() for k in blacklist_data.get("title_keywords", [])],
+        domains=[d.lower() for d in blacklist_data.get("domains", [])],
+    )
+
     return Config(
         targets=targets,
         download=download,
         rate_limit=rate_limit,
         logging=logging_config,
+        blacklist=blacklist,
     )
 
 

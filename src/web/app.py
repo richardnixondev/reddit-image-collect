@@ -1,19 +1,28 @@
 """FastAPI web application for managing Reddit Image Collector."""
 
-import asyncio
+import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Query
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from . import config_manager
 
+# Import database
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from src.database import Database
+
 
 app = FastAPI(title="Reddit Image Collector", version="1.0.0")
+
+# Downloads directory for serving media files
+DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
 
 # Collector state
 collector_status = {
@@ -36,15 +45,21 @@ class UserCreate(BaseModel):
     limit: int = 100
 
 
+class BlacklistItem(BaseModel):
+    value: str
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Render main page."""
     subreddits = config_manager.get_subreddits()
     users = config_manager.get_users()
+    blacklist = config_manager.get_blacklist()
     return templates.TemplateResponse("index.html", {
         "request": request,
         "subreddits": subreddits,
-        "users": users
+        "users": users,
+        "blacklist": blacklist
     })
 
 
@@ -110,6 +125,182 @@ async def delete_user(name: str):
         raise HTTPException(status_code=404, detail="User not found")
 
     return {"message": f"User '{name}' removed successfully"}
+
+
+# Blacklist endpoints
+
+@app.get("/api/blacklist")
+async def get_blacklist():
+    """Get full blacklist configuration."""
+    return config_manager.get_blacklist()
+
+
+@app.post("/api/blacklist/authors")
+async def add_blacklist_author(data: BlacklistItem):
+    """Add an author to the blacklist."""
+    if not data.value:
+        raise HTTPException(status_code=400, detail="Value is required")
+
+    success = config_manager.add_blacklist_author(data.value)
+    if not success:
+        raise HTTPException(status_code=409, detail="Author already blacklisted")
+
+    return {"message": f"Author '{data.value}' added to blacklist"}
+
+
+@app.delete("/api/blacklist/authors/{author}")
+async def remove_blacklist_author(author: str):
+    """Remove an author from the blacklist."""
+    success = config_manager.remove_blacklist_author(author)
+    if not success:
+        raise HTTPException(status_code=404, detail="Author not found in blacklist")
+
+    return {"message": f"Author '{author}' removed from blacklist"}
+
+
+@app.post("/api/blacklist/keywords")
+async def add_blacklist_keyword(data: BlacklistItem):
+    """Add a title keyword to the blacklist."""
+    if not data.value:
+        raise HTTPException(status_code=400, detail="Value is required")
+
+    success = config_manager.add_blacklist_keyword(data.value)
+    if not success:
+        raise HTTPException(status_code=409, detail="Keyword already blacklisted")
+
+    return {"message": f"Keyword '{data.value}' added to blacklist"}
+
+
+@app.delete("/api/blacklist/keywords/{keyword:path}")
+async def remove_blacklist_keyword(keyword: str):
+    """Remove a title keyword from the blacklist."""
+    success = config_manager.remove_blacklist_keyword(keyword)
+    if not success:
+        raise HTTPException(status_code=404, detail="Keyword not found in blacklist")
+
+    return {"message": f"Keyword '{keyword}' removed from blacklist"}
+
+
+@app.post("/api/blacklist/domains")
+async def add_blacklist_domain(data: BlacklistItem):
+    """Add a domain to the blacklist."""
+    if not data.value:
+        raise HTTPException(status_code=400, detail="Value is required")
+
+    success = config_manager.add_blacklist_domain(data.value)
+    if not success:
+        raise HTTPException(status_code=409, detail="Domain already blacklisted")
+
+    return {"message": f"Domain '{data.value}' added to blacklist"}
+
+
+@app.delete("/api/blacklist/domains/{domain:path}")
+async def remove_blacklist_domain(domain: str):
+    """Remove a domain from the blacklist."""
+    success = config_manager.remove_blacklist_domain(domain)
+    if not success:
+        raise HTTPException(status_code=404, detail="Domain not found in blacklist")
+
+    return {"message": f"Domain '{domain}' removed from blacklist"}
+
+
+# Statistics endpoints
+
+@app.get("/api/stats")
+async def get_stats():
+    """Get collection statistics."""
+    db = Database()
+    stats = db.get_stats()
+
+    # Calculate disk usage
+    total_size = 0
+    file_count = 0
+    if DOWNLOADS_DIR.exists():
+        for f in DOWNLOADS_DIR.iterdir():
+            if f.is_file() and not f.name.endswith('.json'):
+                total_size += f.stat().st_size
+                file_count += 1
+
+    stats["disk_size_bytes"] = total_size
+    stats["disk_size_mb"] = round(total_size / (1024 * 1024), 2)
+    stats["disk_size_gb"] = round(total_size / (1024 * 1024 * 1024), 2)
+    stats["file_count"] = file_count
+
+    return stats
+
+
+@app.get("/api/stats/recent")
+async def get_recent_downloads(limit: int = Query(default=10, le=50)):
+    """Get recent downloads."""
+    db = Database()
+    return db.get_recent_downloads(limit)
+
+
+# Media browser endpoints
+
+@app.get("/api/media")
+async def get_media_files(
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    subreddit: Optional[str] = None,
+    media_type: Optional[str] = None
+):
+    """Get media files with pagination and filtering."""
+    db = Database()
+    files = db.get_media_files(limit, offset, subreddit, media_type)
+    total = db.get_total_media_count(subreddit, media_type)
+
+    return {
+        "files": files,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@app.get("/api/media/subreddits")
+async def get_media_subreddits():
+    """Get list of subreddits with downloaded content."""
+    db = Database()
+    return db.get_all_subreddits()
+
+
+@app.get("/api/media/file/{filename:path}")
+async def get_media_file(filename: str):
+    """Serve a media file."""
+    file_path = DOWNLOADS_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(file_path)
+
+
+@app.delete("/api/media/{post_id}")
+async def delete_media(post_id: str):
+    """Delete a media file and its database record."""
+    db = Database()
+    post = db.get_post(post_id)
+
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # Delete the file if it exists
+    if post.local_path:
+        file_path = Path(post.local_path)
+        if file_path.exists():
+            file_path.unlink()
+
+        # Also delete sidecar JSON if exists
+        sidecar_path = file_path.with_suffix(file_path.suffix + '.json')
+        if sidecar_path.exists():
+            sidecar_path.unlink()
+
+    # Remove from database
+    with db._get_connection() as conn:
+        conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+        conn.commit()
+
+    return {"message": f"Media '{post_id}' deleted successfully"}
 
 
 def run_collector():

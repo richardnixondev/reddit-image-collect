@@ -22,18 +22,41 @@ class CollectionStats:
     skipped_score: int = 0
     skipped_nsfw: int = 0
     skipped_type: int = 0
+    skipped_blacklist: int = 0
     errors: int = 0
 
 
 def should_download_post(post: Post, config: Config) -> tuple[bool, str]:
-    """Check post-level filters (NSFW, score). Returns (should_download, reason)."""
+    """Check post-level filters (NSFW, score, blacklist). Returns (should_download, reason)."""
     if config.download.skip_nsfw and post.over_18:
         return False, "nsfw"
 
     if post.score < config.download.min_score:
         return False, "score"
 
+    # Check blacklist: author
+    if post.author and post.author.lower() in config.blacklist.authors:
+        return False, "blacklist_author"
+
+    # Check blacklist: title keywords
+    title_lower = post.title.lower() if post.title else ""
+    for keyword in config.blacklist.title_keywords:
+        if keyword in title_lower:
+            return False, "blacklist_keyword"
+
     return True, ""
+
+
+def is_domain_blacklisted(url: str, blacklist_domains: list[str]) -> bool:
+    """Check if URL domain is in blacklist."""
+    if not url or not blacklist_domains:
+        return False
+
+    url_lower = url.lower()
+    for domain in blacklist_domains:
+        if domain in url_lower:
+            return True
+    return False
 
 
 def should_download_media(media_type: str, config: Config) -> bool:
@@ -61,6 +84,8 @@ def process_post(
             stats.skipped_nsfw += 1
         elif reason == "score":
             stats.skipped_score += 1
+        elif reason.startswith("blacklist"):
+            stats.skipped_blacklist += 1
         logger.debug(f"Skipping {post.id}: {reason}")
         return
 
@@ -93,6 +118,12 @@ def process_post(
             continue
 
         final_url, final_type = extract_media_url(media_url, media_type)
+
+        # Check blacklist: domain
+        if is_domain_blacklisted(final_url, config.blacklist.domains):
+            stats.skipped_blacklist += 1
+            logger.debug(f"Skipping {item_id}: blacklisted domain in {final_url}")
+            continue
 
         # Determine gallery index
         gallery_index = idx + 1 if len(media_urls) > 1 else None
@@ -205,6 +236,7 @@ def print_report(stats: CollectionStats, db: Database, logger) -> None:
     logger.info(f"Skipped (low score): {stats.skipped_score}")
     logger.info(f"Skipped (NSFW): {stats.skipped_nsfw}")
     logger.info(f"Skipped (media type): {stats.skipped_type}")
+    logger.info(f"Skipped (blacklist): {stats.skipped_blacklist}")
     logger.info(f"Errors: {stats.errors}")
     logger.info("-" * 50)
     logger.info(f"Total in database: {db_stats['total_posts']}")
