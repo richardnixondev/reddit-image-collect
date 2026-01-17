@@ -24,6 +24,10 @@ app = FastAPI(title="Reddit Image Collector", version="1.0.0")
 # Downloads directory for serving media files
 DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
 
+# Thumbnails directory
+THUMBS_DIR = DOWNLOADS_DIR / ".thumbs"
+THUMBS_DIR.mkdir(exist_ok=True)
+
 # Collector state
 collector_status = {
     "running": False,
@@ -275,6 +279,78 @@ async def get_media_file(filename: str):
     return FileResponse(file_path)
 
 
+def generate_thumbnail(video_path: Path) -> Optional[Path]:
+    """Generate a thumbnail for a video file using ffmpeg."""
+    thumb_path = THUMBS_DIR / f"{video_path.name}.jpg"
+
+    # If thumbnail already exists, return it
+    if thumb_path.exists():
+        return thumb_path
+
+    try:
+        # Use ffmpeg to extract a frame at 1 second
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(video_path),
+                "-ss", "00:00:01",
+                "-vframes", "1",
+                "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-q:v", "2",
+                str(thumb_path)
+            ],
+            capture_output=True,
+            timeout=30
+        )
+
+        if result.returncode == 0 and thumb_path.exists():
+            return thumb_path
+
+        # If failed at 1s, try at 0s (for very short videos)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(video_path),
+                "-ss", "00:00:00",
+                "-vframes", "1",
+                "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-q:v", "2",
+                str(thumb_path)
+            ],
+            capture_output=True,
+            timeout=30
+        )
+
+        if result.returncode == 0 and thumb_path.exists():
+            return thumb_path
+
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+@app.get("/api/media/thumb/{filename:path}")
+async def get_video_thumbnail(filename: str):
+    """Get or generate a thumbnail for a video file."""
+    video_path = DOWNLOADS_DIR / filename
+
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # Check if it's a video file
+    video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+    if video_path.suffix.lower() not in video_extensions:
+        raise HTTPException(status_code=400, detail="Not a video file")
+
+    # Generate or get cached thumbnail
+    thumb_path = generate_thumbnail(video_path)
+
+    if thumb_path and thumb_path.exists():
+        return FileResponse(thumb_path, media_type="image/jpeg")
+
+    raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
+
+
 @app.delete("/api/media/{post_id}")
 async def delete_media(post_id: str):
     """Delete a media file and its database record."""
@@ -295,12 +371,83 @@ async def delete_media(post_id: str):
         if sidecar_path.exists():
             sidecar_path.unlink()
 
+        # Delete thumbnail if exists
+        thumb_path = THUMBS_DIR / f"{file_path.name}.jpg"
+        if thumb_path.exists():
+            thumb_path.unlink()
+
     # Remove from database
     with db._get_connection() as conn:
         conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
         conn.commit()
 
     return {"message": f"Media '{post_id}' deleted successfully"}
+
+
+# Blacklist cleanup endpoints
+
+@app.get("/api/media/blacklist-preview")
+async def preview_blacklist_cleanup():
+    """Preview how many files would be deleted by cleanup."""
+    blacklist = config_manager.get_blacklist()
+    authors = blacklist.get("authors", [])
+
+    if not authors:
+        return {"count": 0, "authors": []}
+
+    db = Database()
+    count = db.count_posts_by_authors(authors)
+
+    return {"count": count, "authors": authors}
+
+
+@app.post("/api/media/cleanup-blacklist")
+async def cleanup_blacklisted_media():
+    """Delete all media from blacklisted authors."""
+    blacklist = config_manager.get_blacklist()
+    authors = blacklist.get("authors", [])
+
+    if not authors:
+        return {"deleted": 0, "message": "No authors in blacklist"}
+
+    db = Database()
+    posts = db.get_posts_by_authors(authors)
+
+    deleted_count = 0
+    errors = []
+
+    for post in posts:
+        try:
+            # Delete media file
+            if post.local_path:
+                file_path = Path(post.local_path)
+                if file_path.exists():
+                    file_path.unlink()
+
+                # Delete sidecar
+                sidecar_path = file_path.with_suffix(file_path.suffix + '.json')
+                if sidecar_path.exists():
+                    sidecar_path.unlink()
+
+                # Delete thumbnail
+                thumb_path = THUMBS_DIR / f"{file_path.name}.jpg"
+                if thumb_path.exists():
+                    thumb_path.unlink()
+
+            # Remove from database
+            with db._get_connection() as conn:
+                conn.execute("DELETE FROM posts WHERE id = ?", (post.id,))
+                conn.commit()
+
+            deleted_count += 1
+        except Exception as e:
+            errors.append(f"{post.id}: {str(e)}")
+
+    return {
+        "deleted": deleted_count,
+        "errors": errors if errors else None,
+        "message": f"Deleted {deleted_count} files from blacklisted authors"
+    }
 
 
 def run_collector():

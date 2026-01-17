@@ -346,3 +346,65 @@ class Database:
                 """
             )
             return [row[0] for row in cursor.fetchall()]
+
+    def get_posts_by_authors(self, authors: list[str]) -> list[PostRecord]:
+        """Get all downloaded posts from specific authors (case-insensitive)."""
+        if not authors:
+            return []
+
+        with self._get_connection() as conn:
+            # Create placeholders for IN clause
+            placeholders = ','.join('?' * len(authors))
+            # Convert authors to lowercase for case-insensitive matching
+            authors_lower = [a.lower() for a in authors]
+
+            cursor = conn.execute(
+                f"""
+                SELECT * FROM posts
+                WHERE LOWER(author) IN ({placeholders})
+                  AND local_path IS NOT NULL
+                  AND downloaded_at IS NOT NULL
+                """,
+                authors_lower
+            )
+
+            posts = []
+            for row in cursor.fetchall():
+                posts.append(PostRecord(
+                    id=row["id"],
+                    subreddit=row["subreddit"],
+                    author=row["author"],
+                    title=row["title"],
+                    url=row["url"],
+                    media_url=row["media_url"],
+                    media_type=row["media_type"],
+                    score=row["score"],
+                    created_utc=row["created_utc"],
+                    downloaded_at=row["downloaded_at"],
+                    local_path=row["local_path"],
+                    file_hash=row["file_hash"],
+                    permalink=row["permalink"] if "permalink" in row.keys() else None,
+                    source_type=row["source_type"] if "source_type" in row.keys() else None,
+                    flair=row["flair"] if "flair" in row.keys() else None,
+                ))
+            return posts
+
+    def count_posts_by_authors(self, authors: list[str]) -> int:
+        """Count downloaded posts from specific authors (case-insensitive)."""
+        if not authors:
+            return 0
+
+        with self._get_connection() as conn:
+            placeholders = ','.join('?' * len(authors))
+            authors_lower = [a.lower() for a in authors]
+
+            cursor = conn.execute(
+                f"""
+                SELECT COUNT(*) FROM posts
+                WHERE LOWER(author) IN ({placeholders})
+                  AND local_path IS NOT NULL
+                  AND downloaded_at IS NOT NULL
+                """,
+                authors_lower
+            )
+            return cursor.fetchone()[0]
