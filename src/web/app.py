@@ -162,6 +162,29 @@ async def remove_blacklist_author(author: str):
     return {"message": f"Author '{author}' removed from blacklist"}
 
 
+@app.post("/api/blacklist/subreddits")
+async def add_blacklist_subreddit(data: BlacklistItem):
+    """Add a subreddit to the blacklist."""
+    if not data.value:
+        raise HTTPException(status_code=400, detail="Value is required")
+
+    success = config_manager.add_blacklist_subreddit(data.value)
+    if not success:
+        raise HTTPException(status_code=409, detail="Subreddit already blacklisted")
+
+    return {"message": f"Subreddit '{data.value}' added to blacklist"}
+
+
+@app.delete("/api/blacklist/subreddits/{subreddit}")
+async def remove_blacklist_subreddit(subreddit: str):
+    """Remove a subreddit from the blacklist."""
+    success = config_manager.remove_blacklist_subreddit(subreddit)
+    if not success:
+        raise HTTPException(status_code=404, detail="Subreddit not found in blacklist")
+
+    return {"message": f"Subreddit '{subreddit}' removed from blacklist"}
+
+
 @app.post("/api/blacklist/keywords")
 async def add_blacklist_keyword(data: BlacklistItem):
     """Add a title keyword to the blacklist."""
@@ -247,12 +270,35 @@ async def get_media_files(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     subreddit: Optional[str] = None,
-    media_type: Optional[str] = None
+    media_type: Optional[str] = None,
+    favorites_only: bool = Query(default=False),
+    favorite_authors: bool = Query(default=False)
 ):
     """Get media files with pagination and filtering."""
     db = Database()
-    files = db.get_media_files(limit, offset, subreddit, media_type)
-    total = db.get_total_media_count(subreddit, media_type)
+
+    if favorites_only:
+        files = db.get_favorites(limit, offset)
+        total = db.count_favorites()
+    elif favorite_authors:
+        # Get posts from authors who have been favorited
+        fav_authors = db.get_favorite_authors()
+        if fav_authors:
+            files = db.get_media_by_authors(fav_authors, limit, offset, subreddit, media_type)
+            total = db.count_media_by_authors(fav_authors, subreddit, media_type)
+        else:
+            files = []
+            total = 0
+        # Add is_favorite flag
+        for f in files:
+            f["is_favorite"] = db.is_favorite(f["id"])
+    else:
+        files = db.get_media_files(limit, offset, subreddit, media_type)
+        total = db.get_total_media_count(subreddit, media_type)
+
+        # Add is_favorite flag to each file
+        for f in files:
+            f["is_favorite"] = db.is_favorite(f["id"])
 
     return {
         "files": files,
@@ -351,14 +397,29 @@ async def get_video_thumbnail(filename: str):
     raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
 
 
+class DeleteMediaRequest(BaseModel):
+    blacklist_author: bool = False
+    blacklist_subreddit: bool = False
+
+
 @app.delete("/api/media/{post_id}")
-async def delete_media(post_id: str):
-    """Delete a media file and its database record."""
+async def delete_media(post_id: str, blacklist_author: bool = False, blacklist_subreddit: bool = False):
+    """Delete a media file and its database record. Optionally add author/subreddit to blacklist."""
     db = Database()
     post = db.get_post(post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
+
+    # Add to blacklist if requested
+    blacklisted = []
+    if blacklist_author and post.author and post.author not in ("[deleted]", "AutoModerator"):
+        config_manager.add_blacklist_author(post.author)
+        blacklisted.append(f"author:{post.author}")
+
+    if blacklist_subreddit and post.subreddit:
+        config_manager.add_blacklist_subreddit(post.subreddit)
+        blacklisted.append(f"subreddit:{post.subreddit}")
 
     # Delete the file if it exists
     if post.local_path:
@@ -381,7 +442,28 @@ async def delete_media(post_id: str):
         conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
         conn.commit()
 
-    return {"message": f"Media '{post_id}' deleted successfully"}
+    result = {"message": f"Media '{post_id}' deleted successfully"}
+    if blacklisted:
+        result["blacklisted"] = blacklisted
+    return result
+
+
+@app.get("/api/media/{post_id}/info")
+async def get_media_info(post_id: str):
+    """Get media info for delete confirmation dialog."""
+    db = Database()
+    post = db.get_post(post_id)
+
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    return {
+        "id": post.id,
+        "author": post.author,
+        "subreddit": post.subreddit,
+        "title": post.title,
+        "media_type": post.media_type
+    }
 
 
 # Blacklist cleanup endpoints
@@ -391,32 +473,51 @@ async def preview_blacklist_cleanup():
     """Preview how many files would be deleted by cleanup."""
     blacklist = config_manager.get_blacklist()
     authors = blacklist.get("authors", [])
-
-    if not authors:
-        return {"count": 0, "authors": []}
+    subreddits = blacklist.get("subreddits", [])
 
     db = Database()
-    count = db.count_posts_by_authors(authors)
+    author_count = db.count_posts_by_authors(authors) if authors else 0
+    subreddit_count = db.count_posts_by_subreddits(subreddits) if subreddits else 0
 
-    return {"count": count, "authors": authors}
+    return {
+        "author_count": author_count,
+        "subreddit_count": subreddit_count,
+        "total_count": author_count + subreddit_count,
+        "authors": authors,
+        "subreddits": subreddits
+    }
 
 
 @app.post("/api/media/cleanup-blacklist")
 async def cleanup_blacklisted_media():
-    """Delete all media from blacklisted authors."""
+    """Delete all media from blacklisted authors and subreddits."""
     blacklist = config_manager.get_blacklist()
     authors = blacklist.get("authors", [])
+    subreddits = blacklist.get("subreddits", [])
 
-    if not authors:
-        return {"deleted": 0, "message": "No authors in blacklist"}
+    if not authors and not subreddits:
+        return {"deleted": 0, "message": "No authors or subreddits in blacklist"}
 
     db = Database()
-    posts = db.get_posts_by_authors(authors)
+    posts = []
+
+    if authors:
+        posts.extend(db.get_posts_by_authors(authors))
+    if subreddits:
+        posts.extend(db.get_posts_by_subreddits(subreddits))
+
+    # Remove duplicates (in case a post matches both author and subreddit)
+    seen_ids = set()
+    unique_posts = []
+    for post in posts:
+        if post.id not in seen_ids:
+            seen_ids.add(post.id)
+            unique_posts.append(post)
 
     deleted_count = 0
     errors = []
 
-    for post in posts:
+    for post in unique_posts:
         try:
             # Delete media file
             if post.local_path:
@@ -446,7 +547,77 @@ async def cleanup_blacklisted_media():
     return {
         "deleted": deleted_count,
         "errors": errors if errors else None,
-        "message": f"Deleted {deleted_count} files from blacklisted authors"
+        "message": f"Deleted {deleted_count} files from blacklisted authors/subreddits"
+    }
+
+
+# Media type cleanup endpoints
+
+@app.get("/api/media/cleanup-preview")
+async def preview_media_cleanup(media_type: str = Query(..., description="video or gif")):
+    """Preview how many files of a specific type would be deleted."""
+    if media_type not in ("video", "gif"):
+        raise HTTPException(status_code=400, detail="media_type must be 'video' or 'gif'")
+
+    db = Database()
+    count = db.get_total_media_count(media_type=media_type)
+
+    return {"media_type": media_type, "count": count}
+
+
+@app.post("/api/media/cleanup-by-type")
+async def cleanup_media_by_type(media_type: str = Query(..., description="video or gif")):
+    """Delete all media of a specific type (video or gif)."""
+    if media_type not in ("video", "gif"):
+        raise HTTPException(status_code=400, detail="media_type must be 'video' or 'gif'")
+
+    db = Database()
+
+    # Get all posts of this type
+    with db._get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT id, local_path FROM posts
+            WHERE media_type = ? AND local_path IS NOT NULL
+            """,
+            (media_type,)
+        )
+        posts = cursor.fetchall()
+
+    deleted_count = 0
+    errors = []
+
+    for post_id, local_path in posts:
+        try:
+            if local_path:
+                file_path = Path(local_path)
+                if file_path.exists():
+                    file_path.unlink()
+
+                # Delete sidecar
+                sidecar_path = file_path.with_suffix(file_path.suffix + '.json')
+                if sidecar_path.exists():
+                    sidecar_path.unlink()
+
+                # Delete thumbnail
+                thumb_path = THUMBS_DIR / f"{file_path.name}.jpg"
+                if thumb_path.exists():
+                    thumb_path.unlink()
+
+            # Remove from database
+            with db._get_connection() as conn:
+                conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+                conn.commit()
+
+            deleted_count += 1
+        except Exception as e:
+            errors.append(f"{post_id}: {str(e)}")
+
+    return {
+        "deleted": deleted_count,
+        "media_type": media_type,
+        "errors": errors if errors else None,
+        "message": f"Deleted {deleted_count} {media_type} files"
     }
 
 
@@ -489,3 +660,154 @@ async def trigger_collector(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(run_collector)
     return {"message": "Collector started"}
+
+
+# Favorites endpoints
+
+@app.get("/api/favorites")
+async def get_favorites(
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0)
+):
+    """Get favorited posts."""
+    db = Database()
+    favorites = db.get_favorites(limit, offset)
+    total = db.count_favorites()
+
+    # Add is_favorite flag to each item
+    for fav in favorites:
+        fav["is_favorite"] = True
+
+    return {
+        "favorites": favorites,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@app.post("/api/favorites/{post_id}")
+async def add_favorite(post_id: str, add_user_to_collection: bool = True):
+    """Add a post to favorites. Optionally adds the author to user collection."""
+    db = Database()
+
+    # Check if post exists
+    post = db.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # Add to favorites
+    added = db.add_favorite(post_id)
+
+    result = {
+        "message": f"Post '{post_id}' added to favorites" if added else "Post already in favorites",
+        "added": added
+    }
+
+    # Add author to user collection if requested and author is valid
+    if add_user_to_collection and post.author and post.author not in ("[deleted]", "AutoModerator"):
+        user_added = config_manager.add_user(post.author, limit=100)
+        if user_added:
+            result["user_added"] = post.author
+            result["message"] += f". User '{post.author}' added to collection targets."
+
+    return result
+
+
+@app.delete("/api/favorites/{post_id}")
+async def remove_favorite(post_id: str):
+    """Remove a post from favorites."""
+    db = Database()
+    removed = db.remove_favorite(post_id)
+
+    if not removed:
+        raise HTTPException(status_code=404, detail="Post not in favorites")
+
+    return {"message": f"Post '{post_id}' removed from favorites"}
+
+
+@app.get("/api/favorites/authors")
+async def get_favorite_authors():
+    """Get list of unique authors from favorited posts."""
+    db = Database()
+    return db.get_favorite_authors()
+
+
+@app.post("/api/favorites/sync-users")
+async def sync_favorite_authors_to_users():
+    """Add all authors from favorites to user collection targets."""
+    db = Database()
+    authors = db.get_favorite_authors()
+
+    added = []
+    for author in authors:
+        if config_manager.add_user(author, limit=100):
+            added.append(author)
+
+    return {
+        "synced": len(added),
+        "added_users": added,
+        "message": f"Added {len(added)} users to collection targets"
+    }
+
+
+# Settings/Configuration endpoints
+
+class DownloadSettings(BaseModel):
+    media_types: list[str] = ["image"]
+    min_score: int = 1
+    skip_nsfw: bool = False
+    max_file_size_mb: int = 200
+    videos_only_from_favorites: bool = False
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """Get current settings."""
+    config = config_manager.load_config()
+
+    return {
+        "download": config.get("download", {}),
+        "rate_limit": config.get("rate_limit", {}),
+        "blacklist": config.get("blacklist", {})
+    }
+
+
+@app.put("/api/settings/download")
+async def update_download_settings(settings: DownloadSettings):
+    """Update download settings."""
+    config = config_manager.load_config()
+
+    if "download" not in config:
+        config["download"] = {}
+
+    config["download"]["media_types"] = settings.media_types
+    config["download"]["min_score"] = settings.min_score
+    config["download"]["skip_nsfw"] = settings.skip_nsfw
+    config["download"]["max_file_size_mb"] = settings.max_file_size_mb
+    config["download"]["videos_only_from_favorites"] = settings.videos_only_from_favorites
+
+    config_manager.save_config(config)
+
+    return {"message": "Download settings updated", "settings": settings.dict()}
+
+
+class RateLimitSettings(BaseModel):
+    requests_per_minute: int = 20
+    download_delay_seconds: float = 2.0
+
+
+@app.put("/api/settings/rate-limit")
+async def update_rate_limit_settings(settings: RateLimitSettings):
+    """Update rate limit settings."""
+    config = config_manager.load_config()
+
+    if "rate_limit" not in config:
+        config["rate_limit"] = {}
+
+    config["rate_limit"]["requests_per_minute"] = settings.requests_per_minute
+    config["rate_limit"]["download_delay_seconds"] = settings.download_delay_seconds
+
+    config_manager.save_config(config)
+
+    return {"message": "Rate limit settings updated", "settings": settings.dict()}
