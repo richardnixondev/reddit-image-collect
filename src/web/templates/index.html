@@ -553,6 +553,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
             <button class="tab-btn" onclick="switchTab('gallery')">Galeria</button>
+            <button class="tab-btn" onclick="switchTab('settings')">Configuracoes</button>
         </div>
     </div>
 
@@ -687,7 +688,7 @@
                     Limpar Midias de Blacklistados
                 </button>
             </div>
-            <div class="blacklist-grid">
+            <div class="blacklist-grid" style="grid-template-columns: repeat(2, 1fr);">
                 <div class="blacklist-card">
                     <h3>Autores Bloqueados ({{ blacklist.authors|length }})</h3>
                     <form id="author-blacklist-form" class="inline-form-simple">
@@ -706,6 +707,28 @@
                             {% endfor %}
                         {% else %}
                             <span class="empty" style="padding: 10px 0;">Nenhum autor bloqueado</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="blacklist-card">
+                    <h3>Subreddits Bloqueados ({{ blacklist.subreddits|length if blacklist.subreddits else 0 }})</h3>
+                    <form id="subreddit-blacklist-form" class="inline-form-simple">
+                        <div class="form-group">
+                            <input type="text" id="blacklist-subreddit" placeholder="ex: pics">
+                        </div>
+                        <button type="submit" class="btn-add">Adicionar</button>
+                    </form>
+                    <div class="tag-list" id="subreddit-tags">
+                        {% if blacklist.subreddits %}
+                            {% for sub in blacklist.subreddits %}
+                            <div class="tag">
+                                <span>r/{{ sub }}</span>
+                                <button class="tag-remove" onclick="removeBlacklistSubreddit('{{ sub }}')">&times;</button>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <span class="empty" style="padding: 10px 0;">Nenhum subreddit bloqueado</span>
                         {% endif %}
                     </div>
                 </div>
@@ -771,6 +794,10 @@
                     <option value="video">Videos</option>
                     <option value="gif">GIFs</option>
                 </select>
+                <select id="filter-favorites" onchange="loadGallery()">
+                    <option value="">Todas as Midias</option>
+                    <option value="favorites">Somente Favoritos</option>
+                </select>
             </div>
         </div>
 
@@ -783,6 +810,96 @@
         </div>
     </div>
 
+    <!-- Settings Tab -->
+    <div id="settings-tab" class="tab-content">
+        <div class="container">
+            <div class="section">
+                <h2>Configuracoes de Download</h2>
+
+                <div class="form-group">
+                    <label>Tipos de Midia</label>
+                    <div style="display: flex; gap: 20px; margin-top: 10px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="setting-images" checked style="width: auto;">
+                            Imagens
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="setting-videos" style="width: auto;">
+                            Videos
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="setting-gifs" style="width: auto;">
+                            GIFs
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="setting-skip-nsfw" style="width: auto;">
+                        Ignorar conteudo NSFW
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="setting-videos-favorites" style="width: auto;">
+                        Videos/GIFs apenas de usuarios favoritados
+                    </label>
+                    <small style="color: #818384; margin-left: 26px;">Baixa videos e GIFs somente de autores que voce favoritou</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Score Minimo</label>
+                    <input type="number" id="setting-min-score" value="1" min="0">
+                    <small style="color: #818384;">Posts com score menor serao ignorados</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Tamanho Maximo (MB)</label>
+                    <input type="number" id="setting-max-size" value="200" min="1">
+                    <small style="color: #818384;">Arquivos maiores serao ignorados</small>
+                </div>
+
+                <button class="btn-add" onclick="saveSettings()" style="margin-top: 20px;">
+                    Salvar Configuracoes
+                </button>
+            </div>
+
+            <div class="section">
+                <h2>Rate Limit</h2>
+
+                <div class="form-group">
+                    <label>Requisicoes por Minuto</label>
+                    <input type="number" id="setting-rpm" value="20" min="1" max="60">
+                    <small style="color: #818384;">Recomendado: 10-20 para evitar bloqueios</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Delay entre Downloads (segundos)</label>
+                    <input type="number" id="setting-delay" value="2" min="0" step="0.5">
+                </div>
+
+                <button class="btn-add" onclick="saveRateLimitSettings()" style="margin-top: 20px;">
+                    Salvar Rate Limit
+                </button>
+
+                <h2 style="margin-top: 30px;">Favoritos</h2>
+                <div class="form-group">
+                    <p style="color: #818384; margin-bottom: 15px;">
+                        Total de favoritos: <span id="favorites-count">0</span>
+                    </p>
+                    <button class="btn-add" onclick="syncFavoritesToUsers()" style="background: #0079d3;">
+                        Sincronizar Autores Favoritos para Coleta
+                    </button>
+                    <small style="color: #818384; display: block; margin-top: 8px;">
+                        Adiciona todos os autores de posts favoritos na lista de users para coleta
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal -->
     <div class="modal" id="media-modal" onclick="closeModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
@@ -792,6 +909,9 @@
                 <div class="modal-title" id="modal-title"></div>
                 <div class="modal-meta" id="modal-meta"></div>
                 <div class="modal-actions">
+                    <button class="btn-add" id="modal-favorite" onclick="toggleFavorite()" style="background: #ff4500;">
+                        ★ Favoritar
+                    </button>
                     <a class="btn-link" id="modal-reddit" href="#" target="_blank">Ver no Reddit</a>
                     <button class="btn-delete" id="modal-delete">Deletar</button>
                 </div>
@@ -811,6 +931,9 @@
             if (tab === 'gallery') {
                 loadGalleryFilters();
                 loadGallery();
+            }
+            if (tab === 'settings') {
+                loadSettings();
             }
         }
 
@@ -1072,6 +1195,50 @@
             }
         }
 
+        document.getElementById('subreddit-blacklist-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const value = document.getElementById('blacklist-subreddit').value.trim();
+            if (!value) return;
+
+            try {
+                const response = await fetch('/api/blacklist/subreddits', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({value})
+                });
+
+                if (response.ok) {
+                    showAlert('Subreddit adicionado a blacklist!', 'success');
+                    location.reload();
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Erro ao adicionar', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        });
+
+        async function removeBlacklistSubreddit(subreddit) {
+            if (!confirm(`Remover r/${subreddit} da blacklist?`)) return;
+
+            try {
+                const response = await fetch(`/api/blacklist/subreddits/${encodeURIComponent(subreddit)}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showAlert('Subreddit removido da blacklist!', 'success');
+                    location.reload();
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Erro ao remover', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
         async function removeBlacklistKeyword(keyword) {
             if (!confirm(`Remover "${keyword}" da blacklist?`)) return;
 
@@ -1249,11 +1416,13 @@
         async function loadGallery() {
             const subreddit = document.getElementById('filter-subreddit').value;
             const mediaType = document.getElementById('filter-type').value;
+            const favoritesFilter = document.getElementById('filter-favorites').value;
 
             try {
                 let url = `/api/media?limit=${pageSize}&offset=${currentPage * pageSize}`;
                 if (subreddit) url += `&subreddit=${encodeURIComponent(subreddit)}`;
                 if (mediaType) url += `&media_type=${encodeURIComponent(mediaType)}`;
+                if (favoritesFilter === 'favorites') url += `&favorite_authors=true`;
 
                 const response = await fetch(url);
                 const data = await response.json();
@@ -1340,6 +1509,7 @@
 
             document.getElementById('modal-delete').onclick = () => deleteMedia(item.id);
 
+            updateFavoriteButton();
             modal.classList.add('active');
         }
 
@@ -1411,11 +1581,174 @@
             if (e.key === 'Escape') closeModal();
         });
 
+        // Settings functions
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+
+                // Media types
+                const mediaTypes = settings.download.media_types || [];
+                document.getElementById('setting-images').checked = mediaTypes.includes('image');
+                document.getElementById('setting-videos').checked = mediaTypes.includes('video');
+                document.getElementById('setting-gifs').checked = mediaTypes.includes('gif');
+
+                // Other settings
+                document.getElementById('setting-skip-nsfw').checked = settings.download.skip_nsfw || false;
+                document.getElementById('setting-videos-favorites').checked = settings.download.videos_only_from_favorites || false;
+                document.getElementById('setting-min-score').value = settings.download.min_score || 1;
+                document.getElementById('setting-max-size').value = settings.download.max_file_size_mb || 200;
+
+                // Rate limit
+                document.getElementById('setting-rpm').value = settings.rate_limit.requests_per_minute || 20;
+                document.getElementById('setting-delay').value = settings.rate_limit.download_delay_seconds || 2;
+
+                // Load favorites count
+                const favResponse = await fetch('/api/favorites');
+                const favData = await favResponse.json();
+                document.getElementById('favorites-count').textContent = favData.total;
+            } catch (err) {
+                console.error('Failed to load settings:', err);
+            }
+        }
+
+        async function saveSettings() {
+            const mediaTypes = [];
+            if (document.getElementById('setting-images').checked) mediaTypes.push('image');
+            if (document.getElementById('setting-videos').checked) mediaTypes.push('video');
+            if (document.getElementById('setting-gifs').checked) mediaTypes.push('gif');
+
+            const settings = {
+                media_types: mediaTypes,
+                min_score: parseInt(document.getElementById('setting-min-score').value),
+                skip_nsfw: document.getElementById('setting-skip-nsfw').checked,
+                max_file_size_mb: parseInt(document.getElementById('setting-max-size').value),
+                videos_only_from_favorites: document.getElementById('setting-videos-favorites').checked
+            };
+
+            try {
+                const response = await fetch('/api/settings/download', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(settings)
+                });
+
+                if (response.ok) {
+                    showAlert('Configuracoes salvas!', 'success');
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Erro ao salvar', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        async function saveRateLimitSettings() {
+            const settings = {
+                requests_per_minute: parseInt(document.getElementById('setting-rpm').value),
+                download_delay_seconds: parseFloat(document.getElementById('setting-delay').value)
+            };
+
+            try {
+                const response = await fetch('/api/settings/rate-limit', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(settings)
+                });
+
+                if (response.ok) {
+                    showAlert('Rate limit salvo!', 'success');
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Erro ao salvar', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        async function syncFavoritesToUsers() {
+            try {
+                const response = await fetch('/api/favorites/sync-users', {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    if (result.synced > 0) {
+                        showAlert(`${result.synced} usuarios adicionados a coleta!`, 'success');
+                    } else {
+                        showAlert('Todos os autores ja estao na lista de coleta.', 'success');
+                    }
+                } else {
+                    showAlert(result.detail || 'Erro ao sincronizar', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        // Favorite functions
+        async function toggleFavorite() {
+            if (!currentItem) return;
+
+            const isFavorite = currentItem.is_favorite;
+            const btn = document.getElementById('modal-favorite');
+
+            try {
+                if (isFavorite) {
+                    // Remove from favorites
+                    const response = await fetch(`/api/favorites/${encodeURIComponent(currentItem.id)}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        currentItem.is_favorite = false;
+                        btn.textContent = '☆ Favoritar';
+                        btn.style.background = '#ff4500';
+                        showAlert('Removido dos favoritos', 'success');
+                    }
+                } else {
+                    // Add to favorites
+                    const response = await fetch(`/api/favorites/${encodeURIComponent(currentItem.id)}`, {
+                        method: 'POST'
+                    });
+
+                    const result = await response.json();
+                    if (response.ok) {
+                        currentItem.is_favorite = true;
+                        btn.textContent = '★ Favoritado';
+                        btn.style.background = '#4caf50';
+                        if (result.user_added) {
+                            showAlert(`Favoritado! u/${result.user_added} adicionado a coleta.`, 'success');
+                        } else {
+                            showAlert('Adicionado aos favoritos!', 'success');
+                        }
+                    }
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        function updateFavoriteButton() {
+            const btn = document.getElementById('modal-favorite');
+            if (currentItem && currentItem.is_favorite) {
+                btn.textContent = '★ Favoritado';
+                btn.style.background = '#4caf50';
+            } else {
+                btn.textContent = '☆ Favoritar';
+                btn.style.background = '#ff4500';
+            }
+        }
+
         // Initialize
         setInterval(updateStatus, 5000);
         updateStatus();
         loadStats();
         loadRecentDownloads();
+        loadSettings();
     </script>
 </body>
 </html>
