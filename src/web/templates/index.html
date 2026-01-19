@@ -413,9 +413,15 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            padding: 15px 20px;
             flex-wrap: wrap;
             gap: 15px;
+            position: sticky;
+            top: 0;
+            background: #1a1a1b;
+            z-index: 100;
+            margin: -20px -20px 20px -20px;
+            border-bottom: 1px solid #343536;
         }
         .gallery-filters {
             display: flex;
@@ -649,6 +655,61 @@
             color: white;
             text-decoration: none;
             display: inline-block;
+        }
+
+        /* Modal navigation */
+        .modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 80px;
+            font-size: 28px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+            z-index: 10;
+        }
+        .modal-nav:hover {
+            background: rgba(255, 69, 0, 0.8);
+        }
+        .modal-nav:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .modal-nav:disabled:hover {
+            background: rgba(0, 0, 0, 0.6);
+        }
+        .modal-nav.prev {
+            left: -60px;
+            border-radius: 8px 0 0 8px;
+        }
+        .modal-nav.next {
+            right: -60px;
+            border-radius: 0 8px 8px 0;
+        }
+        @media (max-width: 900px) {
+            .modal-nav.prev {
+                left: 10px;
+                border-radius: 8px;
+            }
+            .modal-nav.next {
+                right: 10px;
+                border-radius: 8px;
+            }
+        }
+        .modal-counter {
+            position: absolute;
+            top: -35px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #818384;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -1027,6 +1088,9 @@
     <div class="modal" id="media-modal" onclick="closeModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
             <button class="modal-close" onclick="closeModal()">&times;</button>
+            <span class="modal-counter" id="modal-counter"></span>
+            <button class="modal-nav prev" id="modal-prev" onclick="navigateModal(-1)">&#10094;</button>
+            <button class="modal-nav next" id="modal-next" onclick="navigateModal(1)">&#10095;</button>
             <div id="modal-media"></div>
             <div class="modal-info">
                 <div class="modal-title" id="modal-title"></div>
@@ -1644,7 +1708,7 @@
                         </div>
                         <div class="gallery-info">
                             <div class="gallery-title">${item.title || 'Sem titulo'}</div>
-                            <div class="gallery-meta">r/${item.subreddit} • ${item.media_type}</div>
+                            <div class="gallery-meta">r/${item.subreddit} • ${item.media_type} • u/${item.author || 'deleted'}</div>
                         </div>
                     </div>
                 `;
@@ -1864,13 +1928,26 @@
 
         // Modal functions
         let currentItem = null;
+        let currentItemIndex = -1;
 
         function openModal(item) {
             currentItem = item;
+            // Find the index of this item in the gallery
+            currentItemIndex = galleryItems.findIndex(i => i.id === item.id);
+
+            updateModalContent();
+            updateModalNavigation();
+
             const modal = document.getElementById('media-modal');
+            modal.classList.add('active');
+        }
+
+        function updateModalContent() {
+            if (!currentItem) return;
+
             const mediaContainer = document.getElementById('modal-media');
-            const filename = item.local_path ? item.local_path.split('/').pop() : '';
-            const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
+            const filename = currentItem.local_path ? currentItem.local_path.split('/').pop() : '';
+            const isVideo = currentItem.media_type === 'video' || filename.endsWith('.mp4');
 
             if (isVideo) {
                 mediaContainer.innerHTML = `<video src="/api/media/file/${filename}" controls autoplay style="max-width:100%;max-height:70vh;"></video>`;
@@ -1878,21 +1955,43 @@
                 mediaContainer.innerHTML = `<img src="/api/media/file/${filename}" style="max-width:100%;max-height:70vh;">`;
             }
 
-            document.getElementById('modal-title').textContent = item.title || 'Sem titulo';
-            document.getElementById('modal-meta').textContent = `r/${item.subreddit} • u/${item.author || 'deleted'} • Score: ${item.score}`;
+            document.getElementById('modal-title').textContent = currentItem.title || 'Sem titulo';
+            document.getElementById('modal-meta').textContent = `r/${currentItem.subreddit} • u/${currentItem.author || 'deleted'} • Score: ${currentItem.score}`;
 
             const redditLink = document.getElementById('modal-reddit');
-            if (item.permalink) {
-                redditLink.href = `https://reddit.com${item.permalink}`;
+            if (currentItem.permalink) {
+                redditLink.href = `https://reddit.com${currentItem.permalink}`;
                 redditLink.style.display = 'inline-block';
             } else {
                 redditLink.style.display = 'none';
             }
 
-            document.getElementById('modal-delete').onclick = () => deleteMedia(item.id);
+            document.getElementById('modal-delete').onclick = () => deleteMedia(currentItem.id);
 
             updateFavoriteButton();
-            modal.classList.add('active');
+        }
+
+        function updateModalNavigation() {
+            const prevBtn = document.getElementById('modal-prev');
+            const nextBtn = document.getElementById('modal-next');
+            const counter = document.getElementById('modal-counter');
+
+            prevBtn.disabled = currentItemIndex <= 0;
+            nextBtn.disabled = currentItemIndex >= galleryItems.length - 1;
+
+            counter.textContent = `${currentItemIndex + 1} / ${galleryItems.length}`;
+        }
+
+        function navigateModal(direction) {
+            const newIndex = currentItemIndex + direction;
+
+            if (newIndex < 0 || newIndex >= galleryItems.length) return;
+
+            currentItemIndex = newIndex;
+            currentItem = galleryItems[currentItemIndex];
+
+            updateModalContent();
+            updateModalNavigation();
         }
 
         function closeModal(event) {
@@ -1960,7 +2059,12 @@
 
         // Keyboard navigation
         document.addEventListener('keydown', (e) => {
+            const modal = document.getElementById('media-modal');
+            if (!modal.classList.contains('active')) return;
+
             if (e.key === 'Escape') closeModal();
+            if (e.key === 'ArrowLeft') navigateModal(-1);
+            if (e.key === 'ArrowRight') navigateModal(1);
         });
 
         // Settings functions
