@@ -1999,7 +1999,8 @@
             }
 
             // Build counter display
-            let counterHtml = `<span class="counter-general">${currentItemIndex + 1} / ${galleryItems.length}</span>`;
+            // Use totalItems for general count (total in database), galleryItems.length for loaded items
+            let counterHtml = `<span class="counter-general">${currentItemIndex + 1} / ${totalItems}</span>`;
             if (authorCount > 1) {
                 counterHtml += `<span class="counter-author">u/${authorName}: ${authorIndex}/${authorCount}</span>`;
             }
