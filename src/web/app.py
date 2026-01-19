@@ -408,8 +408,14 @@ async def get_video_thumbnail(filename: str):
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
 
-    # Check if it's a video file
+    # Check file extension
     video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+
+    # If it's actually an image file (misclassified as video), return it directly
+    if video_path.suffix.lower() in image_extensions:
+        return FileResponse(video_path, media_type="image/jpeg")
+
     if video_path.suffix.lower() not in video_extensions:
         raise HTTPException(status_code=400, detail="Not a video file")
 
@@ -418,6 +424,20 @@ async def get_video_thumbnail(filename: str):
 
     if thumb_path and thumb_path.exists():
         return FileResponse(thumb_path, media_type="image/jpeg")
+
+    # If ffmpeg failed, check if file is actually an image (wrong extension)
+    # by checking the file magic bytes
+    try:
+        with open(video_path, 'rb') as f:
+            header = f.read(12)
+            # JPEG magic bytes
+            if header[:2] == b'\xff\xd8':
+                return FileResponse(video_path, media_type="image/jpeg")
+            # PNG magic bytes
+            if header[:8] == b'\x89PNG\r\n\x1a\n':
+                return FileResponse(video_path, media_type="image/png")
+    except:
+        pass
 
     raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
 
