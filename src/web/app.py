@@ -236,6 +236,8 @@ async def remove_blacklist_domain(domain: str):
 @app.get("/api/stats")
 async def get_stats():
     """Get collection statistics."""
+    import shutil
+
     db = Database()
     stats = db.get_stats()
 
@@ -253,7 +255,25 @@ async def get_stats():
     stats["disk_size_gb"] = round(total_size / (1024 * 1024 * 1024), 2)
     stats["file_count"] = file_count
 
+    # Get disk free space
+    try:
+        disk_usage = shutil.disk_usage(DOWNLOADS_DIR)
+        stats["disk_free_gb"] = round(disk_usage.free / (1024 * 1024 * 1024), 2)
+        stats["disk_total_gb"] = round(disk_usage.total / (1024 * 1024 * 1024), 2)
+        stats["disk_used_percent"] = round((disk_usage.used / disk_usage.total) * 100, 1)
+    except:
+        stats["disk_free_gb"] = 0
+        stats["disk_total_gb"] = 0
+        stats["disk_used_percent"] = 0
+
     return stats
+
+
+@app.get("/api/stats/enhanced")
+async def get_enhanced_stats():
+    """Get enhanced statistics for dashboard."""
+    db = Database()
+    return db.get_enhanced_stats()
 
 
 @app.get("/api/stats/recent")

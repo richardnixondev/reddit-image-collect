@@ -280,6 +280,111 @@ class Database:
             "by_type": by_type,
         }
 
+    def get_enhanced_stats(self) -> dict:
+        """Get enhanced statistics for dashboard."""
+        from datetime import datetime, timedelta
+
+        with self._get_connection() as conn:
+            now = datetime.now()
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            week_start = today_start - timedelta(days=7)
+            month_start = today_start - timedelta(days=30)
+
+            # Downloads by period
+            downloads_today = conn.execute(
+                "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ?",
+                (today_start.isoformat(),)
+            ).fetchone()[0]
+
+            downloads_week = conn.execute(
+                "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ?",
+                (week_start.isoformat(),)
+            ).fetchone()[0]
+
+            downloads_month = conn.execute(
+                "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ?",
+                (month_start.isoformat(),)
+            ).fetchone()[0]
+
+            # Average score
+            avg_score = conn.execute(
+                "SELECT AVG(score) FROM posts WHERE downloaded_at IS NOT NULL AND score IS NOT NULL"
+            ).fetchone()[0] or 0
+
+            # Unique authors
+            unique_authors = conn.execute(
+                "SELECT COUNT(DISTINCT author) FROM posts WHERE downloaded_at IS NOT NULL AND author IS NOT NULL"
+            ).fetchone()[0]
+
+            # Favorites count
+            favorites_count = conn.execute(
+                "SELECT COUNT(*) FROM favorites"
+            ).fetchone()[0]
+
+            # Last download
+            last_download = conn.execute(
+                "SELECT downloaded_at FROM posts WHERE downloaded_at IS NOT NULL ORDER BY downloaded_at DESC LIMIT 1"
+            ).fetchone()
+            last_download = last_download[0] if last_download else None
+
+            # First download (to calculate avg/day)
+            first_download = conn.execute(
+                "SELECT downloaded_at FROM posts WHERE downloaded_at IS NOT NULL ORDER BY downloaded_at ASC LIMIT 1"
+            ).fetchone()
+
+            total_downloaded = conn.execute(
+                "SELECT COUNT(*) FROM posts WHERE downloaded_at IS NOT NULL"
+            ).fetchone()[0]
+
+            # Calculate average per day
+            avg_per_day = 0
+            if first_download and first_download[0]:
+                try:
+                    first_date = datetime.fromisoformat(first_download[0].replace('Z', '+00:00'))
+                    days_active = max((now - first_date.replace(tzinfo=None)).days, 1)
+                    avg_per_day = round(total_downloaded / days_active, 1)
+                except:
+                    avg_per_day = 0
+
+            # Top 10 authors
+            top_authors = conn.execute(
+                """
+                SELECT author, COUNT(*) as count
+                FROM posts
+                WHERE downloaded_at IS NOT NULL AND author IS NOT NULL AND author != 'deleted' AND author != '[deleted]'
+                GROUP BY author
+                ORDER BY count DESC
+                LIMIT 10
+                """
+            ).fetchall()
+
+            # Downloads trend (last 14 days)
+            trend_data = []
+            for i in range(13, -1, -1):
+                day = today_start - timedelta(days=i)
+                day_end = day + timedelta(days=1)
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ? AND downloaded_at < ?",
+                    (day.isoformat(), day_end.isoformat())
+                ).fetchone()[0]
+                trend_data.append({
+                    "date": day.strftime("%m/%d"),
+                    "count": count
+                })
+
+        return {
+            "downloads_today": downloads_today,
+            "downloads_week": downloads_week,
+            "downloads_month": downloads_month,
+            "avg_score": round(avg_score, 1),
+            "unique_authors": unique_authors,
+            "favorites_count": favorites_count,
+            "last_download": last_download,
+            "avg_per_day": avg_per_day,
+            "top_authors": [{"author": a, "count": c} for a, c in top_authors],
+            "trend": trend_data
+        }
+
     def get_recent_downloads(self, limit: int = 10) -> list[dict]:
         """Get most recent downloads."""
         with self._get_connection() as conn:
