@@ -727,6 +727,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
             <button class="tab-btn" onclick="switchTab('gallery')">Galeria</button>
+            <button class="tab-btn" onclick="switchTab('sources')">Fontes</button>
             <button class="tab-btn" onclick="switchTab('settings')">Configuracoes</button>
         </div>
     </div>
@@ -779,8 +780,11 @@
                 <div id="recent-list"></div>
             </div>
         </div>
+    </div>
 
-        <div class="container" style="margin-top: 30px;">
+    <!-- Sources Tab -->
+    <div id="sources-tab" class="tab-content">
+        <div class="container">
             <div class="section">
                 <h2>Subreddits ({{ subreddits|length }})</h2>
 
