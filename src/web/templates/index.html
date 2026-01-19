@@ -1365,16 +1365,19 @@
 
     <script>
         // Tab switching
-        function switchTab(tab) {
+        function switchTab(tab, skipLoad = false) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
             document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
             document.getElementById(`${tab}-tab`).classList.add('active');
 
-            if (tab === 'gallery') {
+            if (tab === 'gallery' && !skipLoad) {
                 loadGalleryFilters();
                 loadGallery();
+                setupInfiniteScroll();
+            } else if (tab === 'gallery') {
+                loadGalleryFilters();
                 setupInfiniteScroll();
             }
             if (tab === 'settings') {
@@ -1537,8 +1540,8 @@
         }
 
         function filterGalleryByType(type) {
-            // Switch to gallery tab and set filter
-            switchTab('gallery');
+            // Switch to gallery tab (skip auto-load), set filter, then load
+            switchTab('gallery', true);
             document.getElementById('filter-type').value = type;
             loadGallery();
         }
