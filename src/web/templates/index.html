@@ -490,6 +490,101 @@
             font-size: 14px;
         }
 
+        /* Selection mode */
+        .btn-select-mode {
+            background: #343536;
+            color: #d7dadc;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .btn-select-mode.active {
+            background: #ff4500;
+            color: white;
+        }
+        .gallery-item .select-checkbox {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 24px;
+            height: 24px;
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: white;
+            z-index: 10;
+            transition: all 0.15s;
+        }
+        .gallery-item .select-checkbox:hover {
+            background: rgba(255, 69, 0, 0.8);
+        }
+        .gallery-item .select-checkbox.selected {
+            background: #ff4500;
+            border-color: #ff4500;
+        }
+        .select-mode .gallery-item .select-checkbox {
+            display: flex;
+        }
+        .select-mode .gallery-item {
+            cursor: pointer;
+        }
+        .select-mode .gallery-item.selected {
+            outline: 3px solid #ff4500;
+            outline-offset: -3px;
+        }
+        .gallery-thumb-container {
+            position: relative;
+        }
+
+        /* Selection action bar */
+        .selection-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #272729;
+            border-top: 2px solid #ff4500;
+            padding: 15px 20px;
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1500;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+        }
+        .selection-bar.visible {
+            display: flex;
+        }
+        .selection-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .selection-count {
+            font-size: 16px;
+            font-weight: bold;
+            color: #ff4500;
+        }
+        .selection-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .btn-cancel-select {
+            background: #343536;
+            color: #d7dadc;
+        }
+        .btn-delete-selected {
+            background: #ea0027;
+            color: white;
+        }
+        .btn-select-all {
+            background: #0079d3;
+            color: white;
+        }
+
         /* Modal */
         .modal {
             display: none;
@@ -808,10 +903,25 @@
                     <option value="">Todas as Midias</option>
                     <option value="favorites">Somente Favoritos</option>
                 </select>
+                <button class="btn-select-mode" id="btn-select-mode" onclick="toggleSelectMode()">
+                    Selecionar
+                </button>
             </div>
         </div>
 
         <div class="gallery-grid" id="gallery-grid"></div>
+
+        <!-- Selection action bar -->
+        <div class="selection-bar" id="selection-bar">
+            <div class="selection-info">
+                <span class="selection-count"><span id="selected-count">0</span> selecionado(s)</span>
+                <button class="btn-select-all" onclick="selectAllVisible()">Selecionar Todos</button>
+            </div>
+            <div class="selection-actions">
+                <button class="btn-cancel-select" onclick="toggleSelectMode()">Cancelar</button>
+                <button class="btn-delete-selected" onclick="deleteSelected()">Deletar Selecionados</button>
+            </div>
+        </div>
 
         <div class="gallery-loader" id="gallery-loader">
             <div class="loader-spinner"></div>
@@ -1416,6 +1526,9 @@
         let isLoadingGallery = false;
         let hasMoreItems = true;
         let galleryObserver = null;
+        let galleryItems = [];
+        let isSelectMode = false;
+        let selectedItems = new Set();
 
         async function loadGalleryFilters() {
             try {
@@ -1433,9 +1546,12 @@
         function resetGallery() {
             galleryOffset = 0;
             hasMoreItems = true;
+            galleryItems = [];
+            selectedItems.clear();
             document.getElementById('gallery-grid').innerHTML = '';
             document.getElementById('gallery-end').style.display = 'none';
             document.getElementById('gallery-loader').classList.remove('hidden');
+            updateSelectionCount();
         }
 
         async function loadGallery(append = false) {
@@ -1497,6 +1613,9 @@
         function appendToGallery(files) {
             const container = document.getElementById('gallery-grid');
 
+            // Add files to our items array
+            galleryItems = galleryItems.concat(files);
+
             const html = files.map(item => {
                 const filename = item.local_path ? item.local_path.split('/').pop() : '';
                 const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
@@ -1507,9 +1626,15 @@
                     ? `/api/media/thumb/${filename}`
                     : `/api/media/file/${filename}`;
 
+                // Escape item data for use in onclick
+                const itemData = JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
                 return `
-                    <div class="gallery-item" onclick='openModal(${JSON.stringify(item).replace(/'/g, "\\'")})'>
-                        <div class="gallery-thumb-container" style="position:relative;">
+                    <div class="gallery-item" data-id="${item.id}" data-author="${item.author || ''}" onclick="handleGalleryClick(event, this)">
+                        <div class="gallery-thumb-container">
+                            <div class="select-checkbox" onclick="event.stopPropagation(); toggleItemSelection('${item.id}', this.parentElement.parentElement)">
+                                <span class="check-icon"></span>
+                            </div>
                             <img class="gallery-thumb" src="${thumbSrc}" loading="lazy"
                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                             <div class="gallery-thumb" style="display:none;align-items:center;justify-content:center;font-size:48px;">
@@ -1526,6 +1651,189 @@
             }).join('');
 
             container.insertAdjacentHTML('beforeend', html);
+        }
+
+        function toggleSelectMode() {
+            isSelectMode = !isSelectMode;
+            const galleryGrid = document.getElementById('gallery-grid');
+            const btn = document.getElementById('btn-select-mode');
+            const selectionBar = document.getElementById('selection-bar');
+
+            if (isSelectMode) {
+                galleryGrid.classList.add('select-mode');
+                btn.classList.add('active');
+                btn.textContent = 'Cancelar';
+                selectionBar.classList.add('visible');
+            } else {
+                galleryGrid.classList.remove('select-mode');
+                btn.classList.remove('active');
+                btn.textContent = 'Selecionar';
+                selectionBar.classList.remove('visible');
+                clearSelection();
+            }
+        }
+
+        function handleGalleryClick(event, element) {
+            if (isSelectMode) {
+                const itemId = element.dataset.id;
+                toggleItemSelection(itemId, element);
+            } else {
+                // Find the item data and open modal
+                const item = galleryItems.find(i => i.id === element.dataset.id);
+                if (item) {
+                    openModal(item);
+                }
+            }
+        }
+
+        function toggleItemSelection(itemId, element) {
+            const checkbox = element.querySelector('.select-checkbox');
+
+            if (selectedItems.has(itemId)) {
+                selectedItems.delete(itemId);
+                element.classList.remove('selected');
+                checkbox.classList.remove('selected');
+                checkbox.innerHTML = '';
+            } else {
+                selectedItems.add(itemId);
+                element.classList.add('selected');
+                checkbox.classList.add('selected');
+                checkbox.innerHTML = '✓';
+            }
+
+            updateSelectionCount();
+        }
+
+        function updateSelectionCount() {
+            document.getElementById('selected-count').textContent = selectedItems.size;
+        }
+
+        function clearSelection() {
+            selectedItems.clear();
+            document.querySelectorAll('.gallery-item.selected').forEach(el => {
+                el.classList.remove('selected');
+                const checkbox = el.querySelector('.select-checkbox');
+                checkbox.classList.remove('selected');
+                checkbox.innerHTML = '';
+            });
+            updateSelectionCount();
+        }
+
+        function selectAllVisible() {
+            document.querySelectorAll('.gallery-item').forEach(el => {
+                const itemId = el.dataset.id;
+                if (!selectedItems.has(itemId)) {
+                    selectedItems.add(itemId);
+                    el.classList.add('selected');
+                    const checkbox = el.querySelector('.select-checkbox');
+                    checkbox.classList.add('selected');
+                    checkbox.innerHTML = '✓';
+                }
+            });
+            updateSelectionCount();
+        }
+
+        async function deleteSelected() {
+            if (selectedItems.size === 0) {
+                showAlert('Nenhum item selecionado', 'error');
+                return;
+            }
+
+            const count = selectedItems.size;
+            if (!confirm(`Deletar ${count} arquivo(s) permanentemente?`)) {
+                return;
+            }
+
+            // Collect unique authors from selected items
+            const authorsToBlacklist = new Set();
+            selectedItems.forEach(itemId => {
+                const item = galleryItems.find(i => i.id === itemId);
+                if (item && item.author && item.author !== 'deleted' && item.author !== '[deleted]') {
+                    authorsToBlacklist.add(item.author);
+                }
+            });
+
+            // Show progress
+            const deleteBtn = document.querySelector('.btn-delete-selected');
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Deletando...';
+
+            let deleted = 0;
+            let errors = 0;
+
+            for (const itemId of selectedItems) {
+                try {
+                    const response = await fetch(`/api/media/${encodeURIComponent(itemId)}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        deleted++;
+                        // Remove from DOM
+                        const element = document.querySelector(`.gallery-item[data-id="${itemId}"]`);
+                        if (element) {
+                            element.remove();
+                        }
+                        // Remove from galleryItems array
+                        galleryItems = galleryItems.filter(i => i.id !== itemId);
+                    } else {
+                        errors++;
+                    }
+                } catch (err) {
+                    errors++;
+                }
+
+                // Update progress
+                deleteBtn.textContent = `Deletando... (${deleted}/${count})`;
+            }
+
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = 'Deletar Selecionados';
+
+            if (deleted > 0) {
+                showAlert(`${deleted} arquivo(s) deletado(s)!`, 'success');
+            }
+            if (errors > 0) {
+                showAlert(`${errors} erro(s) ao deletar`, 'error');
+            }
+
+            // Clear selection and exit select mode
+            clearSelection();
+            toggleSelectMode();
+
+            // Refresh stats
+            loadStats();
+            loadRecentDownloads();
+
+            // Suggest adding authors to blacklist
+            if (authorsToBlacklist.size > 0) {
+                const authorsList = Array.from(authorsToBlacklist).slice(0, 10);
+                const moreCount = authorsToBlacklist.size > 10 ? ` e mais ${authorsToBlacklist.size - 10}` : '';
+                const authorsDisplay = authorsList.map(a => `u/${a}`).join(', ') + moreCount;
+
+                const addToBlacklist = confirm(
+                    `Deseja adicionar os seguintes autores na blacklist?\n\n${authorsDisplay}\n\nIsso impedira que novas midias destes usuarios sejam baixadas.`
+                );
+
+                if (addToBlacklist) {
+                    let addedCount = 0;
+                    for (const author of authorsToBlacklist) {
+                        try {
+                            const response = await fetch('/api/blacklist/authors', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({value: author})
+                            });
+                            if (response.ok) addedCount++;
+                        } catch (err) {
+                            // Ignore individual errors
+                        }
+                    }
+                    if (addedCount > 0) {
+                        showAlert(`${addedCount} autor(es) adicionado(s) a blacklist!`, 'success');
+                    }
+                }
+            }
         }
 
         function setupInfiniteScroll() {
