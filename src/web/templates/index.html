@@ -709,7 +709,15 @@
             left: 50%;
             transform: translateX(-50%);
             color: #818384;
-            font-size: 14px;
+            font-size: 13px;
+            display: flex;
+            gap: 20px;
+        }
+        .modal-counter .counter-general {
+            color: #d7dadc;
+        }
+        .modal-counter .counter-author {
+            color: #ff4500;
         }
     </style>
 </head>
@@ -1979,7 +1987,24 @@
             prevBtn.disabled = currentItemIndex <= 0;
             nextBtn.disabled = currentItemIndex >= galleryItems.length - 1;
 
-            counter.textContent = `${currentItemIndex + 1} / ${galleryItems.length}`;
+            // Count author's items in gallery
+            const authorName = currentItem ? currentItem.author : null;
+            let authorCount = 0;
+            let authorIndex = 0;
+
+            if (authorName && authorName !== 'deleted' && authorName !== '[deleted]') {
+                const authorItems = galleryItems.filter(i => i.author === authorName);
+                authorCount = authorItems.length;
+                authorIndex = authorItems.findIndex(i => i.id === currentItem.id) + 1;
+            }
+
+            // Build counter display
+            let counterHtml = `<span class="counter-general">${currentItemIndex + 1} / ${galleryItems.length}</span>`;
+            if (authorCount > 1) {
+                counterHtml += `<span class="counter-author">u/${authorName}: ${authorIndex}/${authorCount}</span>`;
+            }
+
+            counter.innerHTML = counterHtml;
         }
 
         function navigateModal(direction) {
