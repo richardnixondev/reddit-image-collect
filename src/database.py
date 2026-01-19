@@ -297,8 +297,13 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_media_files(self, limit: int = 50, offset: int = 0,
-                        subreddit: str = None, media_type: str = None) -> list[dict]:
-        """Get media files with optional filtering."""
+                        subreddit: str = None, media_type: str = None,
+                        sort: str = "newest") -> list[dict]:
+        """Get media files with optional filtering and sorting.
+
+        Args:
+            sort: 'newest' (default), 'oldest', 'score_high', 'score_low'
+        """
         with self._get_connection() as conn:
             query = """
                 SELECT id, subreddit, author, title, media_type, score,
@@ -316,7 +321,17 @@ class Database:
                 query += " AND media_type = ?"
                 params.append(media_type)
 
-            query += " ORDER BY downloaded_at DESC LIMIT ? OFFSET ?"
+            # Apply sorting
+            if sort == "oldest":
+                query += " ORDER BY created_utc ASC"
+            elif sort == "score_high":
+                query += " ORDER BY score DESC"
+            elif sort == "score_low":
+                query += " ORDER BY score ASC"
+            else:  # newest (default)
+                query += " ORDER BY created_utc DESC"
+
+            query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
             cursor = conn.execute(query, params)

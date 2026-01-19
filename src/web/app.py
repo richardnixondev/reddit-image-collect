@@ -271,10 +271,15 @@ async def get_media_files(
     offset: int = Query(default=0, ge=0),
     subreddit: Optional[str] = None,
     media_type: Optional[str] = None,
+    sort: str = Query(default="newest"),
     favorites_only: bool = Query(default=False),
     favorite_authors: bool = Query(default=False)
 ):
-    """Get media files with pagination and filtering."""
+    """Get media files with pagination, filtering and sorting.
+
+    Args:
+        sort: 'newest' (default), 'oldest', 'score_high', 'score_low'
+    """
     db = Database()
 
     if favorites_only:
@@ -293,7 +298,7 @@ async def get_media_files(
         for f in files:
             f["is_favorite"] = db.is_favorite(f["id"])
     else:
-        files = db.get_media_files(limit, offset, subreddit, media_type)
+        files = db.get_media_files(limit, offset, subreddit, media_type, sort)
         total = db.get_total_media_count(subreddit, media_type)
 
         # Add is_favorite flag to each file

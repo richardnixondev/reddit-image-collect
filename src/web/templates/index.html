@@ -972,6 +972,12 @@
                     <option value="">Todas as Midias</option>
                     <option value="favorites">Somente Favoritos</option>
                 </select>
+                <select id="filter-sort" onchange="loadGallery()">
+                    <option value="newest">Mais Recentes</option>
+                    <option value="oldest">Mais Antigas</option>
+                    <option value="score_high">Maior Score</option>
+                    <option value="score_low">Menor Score</option>
+                </select>
                 <button class="btn-select-mode" id="btn-select-mode" onclick="toggleSelectMode()">
                     Selecionar
                 </button>
@@ -1640,9 +1646,10 @@
             const subreddit = document.getElementById('filter-subreddit').value;
             const mediaType = document.getElementById('filter-type').value;
             const favoritesFilter = document.getElementById('filter-favorites').value;
+            const sortOrder = document.getElementById('filter-sort').value;
 
             try {
-                let url = `/api/media?limit=${pageSize}&offset=${galleryOffset}`;
+                let url = `/api/media?limit=${pageSize}&offset=${galleryOffset}&sort=${sortOrder}`;
                 if (subreddit) url += `&subreddit=${encodeURIComponent(subreddit)}`;
                 if (mediaType) url += `&media_type=${encodeURIComponent(mediaType)}`;
                 if (favoritesFilter === 'favorites') url += `&favorite_authors=true`;
