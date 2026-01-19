@@ -290,20 +290,25 @@ class Database:
             week_start = today_start - timedelta(days=7)
             month_start = today_start - timedelta(days=30)
 
+            # Format dates for SQLite comparison (space separator, not 'T')
+            today_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+            week_str = week_start.strftime('%Y-%m-%d %H:%M:%S')
+            month_str = month_start.strftime('%Y-%m-%d %H:%M:%S')
+
             # Downloads by period
             downloads_today = conn.execute(
                 "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ?",
-                (today_start.isoformat(),)
+                (today_str,)
             ).fetchone()[0]
 
             downloads_week = conn.execute(
                 "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ?",
-                (week_start.isoformat(),)
+                (week_str,)
             ).fetchone()[0]
 
             downloads_month = conn.execute(
                 "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ?",
-                (month_start.isoformat(),)
+                (month_str,)
             ).fetchone()[0]
 
             # Average score
@@ -363,9 +368,11 @@ class Database:
             for i in range(13, -1, -1):
                 day = today_start - timedelta(days=i)
                 day_end = day + timedelta(days=1)
+                day_str = day.strftime('%Y-%m-%d %H:%M:%S')
+                day_end_str = day_end.strftime('%Y-%m-%d %H:%M:%S')
                 count = conn.execute(
                     "SELECT COUNT(*) FROM posts WHERE downloaded_at >= ? AND downloaded_at < ?",
-                    (day.isoformat(), day_end.isoformat())
+                    (day_str, day_end_str)
                 ).fetchone()[0]
                 trend_data.append({
                     "date": day.strftime("%m/%d"),
