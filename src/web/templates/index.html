@@ -461,23 +461,33 @@
             color: #818384;
             margin-top: 3px;
         }
-        .pagination {
+        .gallery-loader {
             display: flex;
             justify-content: center;
             align-items: center;
-            gap: 15px;
-            margin-top: 20px;
-        }
-        .pagination button {
-            background: #343536;
-            color: #d7dadc;
-        }
-        .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .page-info {
+            gap: 12px;
+            padding: 30px;
             color: #818384;
+        }
+        .gallery-loader.hidden {
+            display: none;
+        }
+        .loader-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #343536;
+            border-top-color: #ff4500;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .gallery-end {
+            text-align: center;
+            padding: 30px;
+            color: #818384;
+            font-size: 14px;
         }
 
         /* Modal */
@@ -803,10 +813,13 @@
 
         <div class="gallery-grid" id="gallery-grid"></div>
 
-        <div class="pagination">
-            <button id="prev-page" onclick="changePage(-1)">Anterior</button>
-            <span class="page-info" id="page-info">Pagina 1</span>
-            <button id="next-page" onclick="changePage(1)">Proxima</button>
+        <div class="gallery-loader" id="gallery-loader">
+            <div class="loader-spinner"></div>
+            <span>Carregando...</span>
+        </div>
+
+        <div class="gallery-end" id="gallery-end" style="display: none;">
+            <span>Fim da galeria</span>
         </div>
     </div>
 
@@ -931,6 +944,7 @@
             if (tab === 'gallery') {
                 loadGalleryFilters();
                 loadGallery();
+                setupInfiniteScroll();
             }
             if (tab === 'settings') {
                 loadSettings();
@@ -1395,10 +1409,13 @@
             }
         }
 
-        // Gallery functions
-        let currentPage = 0;
+        // Gallery functions with infinite scroll
+        let galleryOffset = 0;
         const pageSize = 50;
         let totalItems = 0;
+        let isLoadingGallery = false;
+        let hasMoreItems = true;
+        let galleryObserver = null;
 
         async function loadGalleryFilters() {
             try {
@@ -1413,13 +1430,31 @@
             }
         }
 
-        async function loadGallery() {
+        function resetGallery() {
+            galleryOffset = 0;
+            hasMoreItems = true;
+            document.getElementById('gallery-grid').innerHTML = '';
+            document.getElementById('gallery-end').style.display = 'none';
+            document.getElementById('gallery-loader').classList.remove('hidden');
+        }
+
+        async function loadGallery(append = false) {
+            if (isLoadingGallery || (!hasMoreItems && append)) return;
+
+            if (!append) {
+                resetGallery();
+            }
+
+            isLoadingGallery = true;
+            const loader = document.getElementById('gallery-loader');
+            loader.classList.remove('hidden');
+
             const subreddit = document.getElementById('filter-subreddit').value;
             const mediaType = document.getElementById('filter-type').value;
             const favoritesFilter = document.getElementById('filter-favorites').value;
 
             try {
-                let url = `/api/media?limit=${pageSize}&offset=${currentPage * pageSize}`;
+                let url = `/api/media?limit=${pageSize}&offset=${galleryOffset}`;
                 if (subreddit) url += `&subreddit=${encodeURIComponent(subreddit)}`;
                 if (mediaType) url += `&media_type=${encodeURIComponent(mediaType)}`;
                 if (favoritesFilter === 'favorites') url += `&favorite_authors=true`;
@@ -1428,17 +1463,41 @@
                 const data = await response.json();
 
                 totalItems = data.total;
-                renderGallery(data.files);
-                updatePagination();
+
+                if (data.files.length > 0) {
+                    appendToGallery(data.files);
+                    galleryOffset += data.files.length;
+                }
+
+                // Check if we have more items to load
+                if (galleryOffset >= totalItems || data.files.length < pageSize) {
+                    hasMoreItems = false;
+                    loader.classList.add('hidden');
+                    if (galleryOffset > 0) {
+                        document.getElementById('gallery-end').style.display = 'block';
+                    }
+                } else {
+                    loader.classList.remove('hidden');
+                }
+
+                // Show empty message if no items at all
+                if (totalItems === 0) {
+                    document.getElementById('gallery-grid').innerHTML =
+                        '<div class="empty" style="grid-column: 1/-1;">Nenhuma midia encontrada</div>';
+                    loader.classList.add('hidden');
+                }
             } catch (err) {
                 console.error('Failed to load gallery:', err);
+                loader.classList.add('hidden');
+            } finally {
+                isLoadingGallery = false;
             }
         }
 
-        function renderGallery(files) {
+        function appendToGallery(files) {
             const container = document.getElementById('gallery-grid');
 
-            container.innerHTML = files.map(item => {
+            const html = files.map(item => {
                 const filename = item.local_path ? item.local_path.split('/').pop() : '';
                 const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
                 const isGif = item.media_type === 'gif' || filename.endsWith('.gif');
@@ -1464,20 +1523,35 @@
                         </div>
                     </div>
                 `;
-            }).join('') || '<div class="empty" style="grid-column: 1/-1;">Nenhuma midia encontrada</div>';
+            }).join('');
+
+            container.insertAdjacentHTML('beforeend', html);
         }
 
-        function updatePagination() {
-            const totalPages = Math.ceil(totalItems / pageSize);
-            document.getElementById('page-info').textContent = `Pagina ${currentPage + 1} de ${totalPages || 1}`;
-            document.getElementById('prev-page').disabled = currentPage === 0;
-            document.getElementById('next-page').disabled = currentPage >= totalPages - 1;
-        }
+        function setupInfiniteScroll() {
+            // Disconnect existing observer if any
+            if (galleryObserver) {
+                galleryObserver.disconnect();
+            }
 
-        function changePage(delta) {
-            currentPage += delta;
-            loadGallery();
-            window.scrollTo(0, 0);
+            // Create intersection observer for infinite scroll
+            galleryObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && !isLoadingGallery && hasMoreItems) {
+                        loadGallery(true);
+                    }
+                });
+            }, {
+                root: null,
+                rootMargin: '200px',
+                threshold: 0
+            });
+
+            // Observe the loader element
+            const loader = document.getElementById('gallery-loader');
+            if (loader) {
+                galleryObserver.observe(loader);
+            }
         }
 
         // Modal functions
