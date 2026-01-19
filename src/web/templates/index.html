@@ -2003,8 +2003,9 @@
         async function deleteMedia(postId) {
             if (!confirm('Deletar este arquivo permanentemente?')) return;
 
-            // Guardar info do autor antes de deletar
+            // Save author info and current index before deleting
             const author = currentItem ? currentItem.author : null;
+            const deletedIndex = currentItemIndex;
 
             try {
                 const response = await fetch(`/api/media/${encodeURIComponent(postId)}`, {
@@ -2013,12 +2014,33 @@
 
                 if (response.ok) {
                     showAlert('Arquivo deletado!', 'success');
-                    closeModal();
-                    loadGallery();
+
+                    // Remove from DOM
+                    const element = document.querySelector(`.gallery-item[data-id="${postId}"]`);
+                    if (element) {
+                        element.remove();
+                    }
+
+                    // Remove from galleryItems array
+                    galleryItems = galleryItems.filter(i => i.id !== postId);
+                    totalItems--;
+
+                    // Navigate to next item or close if no more items
+                    if (galleryItems.length === 0) {
+                        closeModal();
+                    } else {
+                        // Stay at same index (which now shows next item) or go to previous if at end
+                        currentItemIndex = Math.min(deletedIndex, galleryItems.length - 1);
+                        currentItem = galleryItems[currentItemIndex];
+                        updateModalContent();
+                        updateModalNavigation();
+                    }
+
+                    // Update stats in background
                     loadStats();
                     loadRecentDownloads();
 
-                    // Sugerir adicionar autor na blacklist
+                    // Suggest adding author to blacklist
                     if (author && author !== 'deleted' && author !== '[deleted]') {
                         const addToBlacklist = confirm(`Deseja adicionar u/${author} na blacklist?\n\nIsso impedira que novas midias deste usuario sejam baixadas.`);
                         if (addToBlacklist) {
