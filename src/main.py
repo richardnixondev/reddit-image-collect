@@ -188,6 +188,20 @@ def process_post(
                 stats.skipped_exists += 1
                 continue
 
+            # Correct media_type based on actual file extension
+            ext = os.path.splitext(local_path)[1].lower()
+            actual_type = final_type
+            if ext in ('.jpg', '.jpeg', '.png', '.webp'):
+                actual_type = 'image'
+            elif ext == '.gif':
+                actual_type = 'gif'
+            elif ext in ('.mp4', '.webm', '.mov'):
+                actual_type = 'video'
+
+            if actual_type != final_type:
+                logger.debug(f"Corrected media_type for {item_id}: {final_type} -> {actual_type}")
+                db.update_media_type(item_id, actual_type)
+
             db.mark_downloaded(item_id, local_path, file_hash)
             stats.downloaded += 1
             if len(media_urls) > 1:

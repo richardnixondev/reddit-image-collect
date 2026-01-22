@@ -662,6 +662,118 @@
             font-size: 14px;
         }
 
+        /* Authors Grid */
+        .authors-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 15px;
+        }
+        .author-card {
+            background: #272729;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+        }
+        .author-card:hover {
+            transform: scale(1.03);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .author-card.is-favorite {
+            border: 2px solid #ff4500;
+        }
+        .author-thumb {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            background: #343536;
+        }
+        .author-info {
+            padding: 12px;
+        }
+        .author-name {
+            font-size: 14px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 5px;
+        }
+        .author-stats {
+            font-size: 11px;
+            color: #818384;
+            display: flex;
+            justify-content: space-between;
+        }
+        .author-favorite-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(255, 69, 0, 0.9);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        /* Author Modal */
+        .author-modal-content {
+            background: #1a1a1b;
+            max-width: 95vw;
+            width: 1200px;
+            max-height: 90vh;
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .author-modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #343536;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .author-modal-header h2 {
+            margin: 0;
+            border: none;
+            padding: 0;
+        }
+        .author-modal-stats {
+            color: #818384;
+            font-size: 13px;
+        }
+        .author-modal-filters {
+            padding: 10px 20px;
+            border-bottom: 1px solid #343536;
+        }
+        .author-media-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            padding: 15px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .author-media-item {
+            aspect-ratio: 1;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+        }
+        .author-media-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .author-media-item:hover {
+            opacity: 0.8;
+        }
+
         /* Selection mode */
         .btn-select-mode {
             background: #343536;
@@ -710,6 +822,62 @@
         }
         .gallery-thumb-container {
             position: relative;
+        }
+
+        /* Score badge */
+        .score-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .score-badge.score-low {
+            background: rgba(129, 131, 132, 0.9);
+            color: #fff;
+        }
+        .score-badge.score-medium {
+            background: rgba(0, 121, 211, 0.9);
+            color: #fff;
+        }
+        .score-badge.score-good {
+            background: rgba(0, 168, 107, 0.9);
+            color: #fff;
+        }
+        .score-badge.score-high {
+            background: rgba(255, 69, 0, 0.95);
+            color: #fff;
+            box-shadow: 0 0 8px rgba(255, 69, 0, 0.5);
+        }
+        .score-badge.score-very-high {
+            background: rgba(147, 51, 234, 0.95);
+            color: #fff;
+            box-shadow: 0 0 8px rgba(147, 51, 234, 0.5);
+        }
+        .score-badge.score-top {
+            background: linear-gradient(135deg, #ffd700, #ffaa00);
+            color: #000;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.6);
+        }
+
+        /* Author favorite badge */
+        .author-fav-badge {
+            position: absolute;
+            top: 28px;
+            right: 5px;
+            background: rgba(255, 69, 0, 0.95);
+            color: white;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: bold;
+            z-index: 5;
         }
 
         /* Selection action bar */
@@ -792,6 +960,19 @@
             color: white;
             font-size: 30px;
             cursor: pointer;
+        }
+        .modal-media-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        .modal-badges {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 10;
         }
         .modal-info {
             background: #272729;
@@ -893,6 +1074,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
             <button class="tab-btn" onclick="switchTab('gallery')">Galeria</button>
+            <button class="tab-btn" onclick="switchTab('authors')">Autores</button>
             <button class="tab-btn" onclick="switchTab('sources')">Fontes</button>
             <button class="tab-btn" onclick="switchTab('settings')">Configuracoes</button>
         </div>
@@ -1251,6 +1433,59 @@
         </div>
     </div>
 
+    <!-- Authors Tab -->
+    <div id="authors-tab" class="tab-content">
+        <div class="gallery-header">
+            <h2 style="border: none; margin: 0; padding: 0;">Galeria por Autores</h2>
+            <div class="gallery-filters">
+                <select id="authors-filter-favorites" onchange="loadAuthors()">
+                    <option value="">Todos os Autores</option>
+                    <option value="favorites">Apenas Favoritados</option>
+                </select>
+                <select id="authors-sort" onchange="loadAuthors()">
+                    <option value="count">Mais Midias</option>
+                    <option value="recent">Mais Recentes</option>
+                    <option value="name">Nome (A-Z)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="authors-grid" id="authors-grid"></div>
+
+        <div class="gallery-loader" id="authors-loader">
+            <div class="loader-spinner"></div>
+            <span>Carregando autores...</span>
+        </div>
+
+        <div class="gallery-end" id="authors-end" style="display: none;">
+            <span>Fim da lista</span>
+        </div>
+    </div>
+
+    <!-- Author Detail Modal -->
+    <div class="modal" id="author-modal" onclick="closeAuthorModal(event)">
+        <div class="author-modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeAuthorModal()">&times;</button>
+            <div class="author-modal-header">
+                <h2 id="author-modal-name">Autor</h2>
+                <div class="author-modal-stats" id="author-modal-stats"></div>
+            </div>
+            <div class="author-modal-filters">
+                <select id="author-media-sort" onchange="loadAuthorMedia()">
+                    <option value="newest">Mais Recentes</option>
+                    <option value="oldest">Mais Antigos</option>
+                    <option value="score_high">Maior Score</option>
+                    <option value="score_low">Menor Score</option>
+                </select>
+            </div>
+            <div class="author-media-grid" id="author-media-grid"></div>
+            <div class="gallery-loader" id="author-media-loader">
+                <div class="loader-spinner"></div>
+                <span>Carregando...</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content">
         <div class="container">
@@ -1379,6 +1614,10 @@
             } else if (tab === 'gallery') {
                 loadGalleryFilters();
                 setupInfiniteScroll();
+            }
+            if (tab === 'authors' && !skipLoad) {
+                loadAuthors();
+                setupAuthorsInfiniteScroll();
             }
             if (tab === 'settings') {
                 loadSettings();
@@ -2050,6 +2289,20 @@
             }
         }
 
+        function getScoreBadgeClass(score) {
+            if (score >= 1000) return 'score-top';
+            if (score >= 200) return 'score-very-high';
+            if (score >= 100) return 'score-high';
+            if (score >= 50) return 'score-good';
+            if (score >= 10) return 'score-medium';
+            return 'score-low';
+        }
+
+        function formatScore(score) {
+            if (score >= 1000) return (score / 1000).toFixed(1) + 'k';
+            return score.toString();
+        }
+
         function appendToGallery(files) {
             const container = document.getElementById('gallery-grid');
 
@@ -2060,6 +2313,8 @@
                 const filename = item.local_path ? item.local_path.split('/').pop() : '';
                 const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
                 const isGif = item.media_type === 'gif' || filename.endsWith('.gif');
+                const score = item.score || 0;
+                const scoreClass = getScoreBadgeClass(score);
 
                 // For videos, use thumbnail endpoint with fallback to emoji
                 const thumbSrc = isVideo
@@ -2075,12 +2330,16 @@
                             <div class="select-checkbox" onclick="event.stopPropagation(); toggleItemSelection('${item.id}', this.parentElement.parentElement)">
                                 <span class="check-icon"></span>
                             </div>
+                            <div class="score-badge ${scoreClass}" title="Score: ${score}">
+                                <span>&#9650;</span>${formatScore(score)}
+                            </div>
+                            ${item.is_author_favorite ? '<div class="author-fav-badge" title="Autor favoritado">★ FAV</div>' : ''}
                             <img class="gallery-thumb" src="${thumbSrc}" loading="lazy"
                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                             <div class="gallery-thumb" style="display:none;align-items:center;justify-content:center;font-size:48px;">
                                 ${isVideo ? '🎬' : '🖼️'}
                             </div>
-                            ${isVideo ? '<div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px;font-size:11px;">VIDEO</div>' : ''}
+                            ${isVideo ? '<div style="position:absolute;bottom:5px;left:5px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px;font-size:11px;">VIDEO</div>' : ''}
                         </div>
                         <div class="gallery-info">
                             <div class="gallery-title">${item.title || 'Sem titulo'}</div>
@@ -2324,11 +2583,54 @@
             const mediaContainer = document.getElementById('modal-media');
             const filename = currentItem.local_path ? currentItem.local_path.split('/').pop() : '';
             const isVideo = currentItem.media_type === 'video' || filename.endsWith('.mp4');
+            const score = currentItem.score || 0;
+            const scoreClass = getScoreBadgeClass(score);
+
+            // Build badges HTML
+            const badgesHtml = `
+                <div class="modal-badges">
+                    <div class="score-badge ${scoreClass}" style="position:relative;top:auto;right:auto;">
+                        <span>&#9650;</span>${formatScore(score)}
+                    </div>
+                    ${currentItem.is_author_favorite ? '<div class="author-fav-badge" style="position:relative;top:auto;right:auto;">★ FAV</div>' : ''}
+                </div>
+            `;
 
             if (isVideo) {
-                mediaContainer.innerHTML = `<video src="/api/media/file/${filename}" controls autoplay style="max-width:100%;max-height:70vh;"></video>`;
+                mediaContainer.innerHTML = `
+                    <div class="modal-media-wrapper">
+                        ${badgesHtml}
+                        <video controls autoplay playsinline preload="auto" style="max-width:100%;max-height:70vh;">
+                            <source src="/api/media/file/${filename}" type="video/mp4">
+                            Seu navegador nao suporta video HTML5.
+                        </video>
+                    </div>
+                    <div id="video-error" style="display:none;color:#ff4500;padding:10px;text-align:center;"></div>
+                `;
+                const video = mediaContainer.querySelector('video');
+                video.onerror = function() {
+                    const errorDiv = document.getElementById('video-error');
+                    const error = video.error;
+                    let msg = 'Erro ao carregar video';
+                    if (error) {
+                        switch(error.code) {
+                            case 1: msg = 'Video abortado'; break;
+                            case 2: msg = 'Erro de rede'; break;
+                            case 3: msg = 'Erro ao decodificar video'; break;
+                            case 4: msg = 'Formato nao suportado'; break;
+                        }
+                    }
+                    errorDiv.textContent = msg;
+                    errorDiv.style.display = 'block';
+                    console.error('Video error:', error, 'File:', filename);
+                };
             } else {
-                mediaContainer.innerHTML = `<img src="/api/media/file/${filename}" style="max-width:100%;max-height:70vh;">`;
+                mediaContainer.innerHTML = `
+                    <div class="modal-media-wrapper">
+                        ${badgesHtml}
+                        <img src="/api/media/file/${filename}" style="max-width:100%;max-height:70vh;">
+                    </div>
+                `;
             }
 
             document.getElementById('modal-title').textContent = currentItem.title || 'Sem titulo';
@@ -2642,6 +2944,213 @@
             } else {
                 btn.textContent = '☆ Favoritar';
                 btn.style.background = '#ff4500';
+            }
+        }
+
+        // Authors gallery functions
+        let authorsOffset = 0;
+        let authorsHasMore = true;
+        let isLoadingAuthors = false;
+        let authorsObserver = null;
+        let currentAuthor = null;
+        let authorMediaOffset = 0;
+        let authorMediaHasMore = true;
+        let isLoadingAuthorMedia = false;
+        let authorMediaItems = [];
+
+        function resetAuthors() {
+            authorsOffset = 0;
+            authorsHasMore = true;
+            document.getElementById('authors-grid').innerHTML = '';
+            document.getElementById('authors-end').style.display = 'none';
+            document.getElementById('authors-loader').classList.remove('hidden');
+        }
+
+        async function loadAuthors(append = false) {
+            if (isLoadingAuthors || (!authorsHasMore && append)) return;
+
+            if (!append) {
+                resetAuthors();
+            }
+
+            isLoadingAuthors = true;
+            const loader = document.getElementById('authors-loader');
+            loader.classList.remove('hidden');
+
+            const favoritesOnly = document.getElementById('authors-filter-favorites').value === 'favorites';
+            const sort = document.getElementById('authors-sort').value;
+
+            try {
+                const url = `/api/authors?limit=50&offset=${authorsOffset}&favorites_only=${favoritesOnly}&sort=${sort}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.authors && data.authors.length > 0) {
+                    appendAuthors(data.authors);
+                    authorsOffset += data.authors.length;
+                }
+
+                if (authorsOffset >= data.total || data.authors.length < 50) {
+                    authorsHasMore = false;
+                    loader.classList.add('hidden');
+                    if (authorsOffset > 0) {
+                        document.getElementById('authors-end').style.display = 'block';
+                    }
+                }
+
+                if (data.total === 0) {
+                    document.getElementById('authors-grid').innerHTML =
+                        '<div class="empty" style="grid-column: 1/-1; text-align: center; padding: 40px; color: #818384;">Nenhum autor encontrado</div>';
+                    loader.classList.add('hidden');
+                }
+            } catch (err) {
+                console.error('Failed to load authors:', err);
+                loader.classList.add('hidden');
+            } finally {
+                isLoadingAuthors = false;
+            }
+        }
+
+        function appendAuthors(authors) {
+            const container = document.getElementById('authors-grid');
+
+            const html = authors.map(author => {
+                const thumbFile = author.thumb_path ? author.thumb_path.split('/').pop() : '';
+                const thumbSrc = thumbFile ? `/api/media/file/${thumbFile}` : '';
+
+                return `
+                    <div class="author-card ${author.is_favorite ? 'is-favorite' : ''}" onclick="openAuthorModal('${author.author}', ${author.media_count})">
+                        ${author.is_favorite ? '<div class="author-favorite-badge">FAV</div>' : ''}
+                        ${thumbSrc ?
+                            `<img class="author-thumb" src="${thumbSrc}" loading="lazy" onerror="this.outerHTML='<div class=\\'author-thumb\\' style=\\'display:flex;align-items:center;justify-content:center;font-size:48px;\\'>👤</div>'">` :
+                            `<div class="author-thumb" style="display:flex;align-items:center;justify-content:center;font-size:48px;">👤</div>`
+                        }
+                        <div class="author-info">
+                            <div class="author-name">u/${author.author}</div>
+                            <div class="author-stats">
+                                <span>${author.media_count} midias</span>
+                                <span>★ ${formatScore(author.max_score || 0)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.insertAdjacentHTML('beforeend', html);
+        }
+
+        function setupAuthorsInfiniteScroll() {
+            if (authorsObserver) {
+                authorsObserver.disconnect();
+            }
+
+            authorsObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && !isLoadingAuthors && authorsHasMore) {
+                        loadAuthors(true);
+                    }
+                });
+            }, { rootMargin: '200px' });
+
+            const loader = document.getElementById('authors-loader');
+            if (loader) {
+                authorsObserver.observe(loader);
+            }
+        }
+
+        // Author modal functions
+        function openAuthorModal(author, mediaCount) {
+            currentAuthor = author;
+            authorMediaOffset = 0;
+            authorMediaHasMore = true;
+            authorMediaItems = [];
+
+            document.getElementById('author-modal-name').textContent = `u/${author}`;
+            document.getElementById('author-modal-stats').textContent = `${mediaCount} midias`;
+            document.getElementById('author-media-grid').innerHTML = '';
+            document.getElementById('author-modal').classList.add('active');
+
+            loadAuthorMedia();
+        }
+
+        function closeAuthorModal(event) {
+            if (event && event.target !== document.getElementById('author-modal')) return;
+            document.getElementById('author-modal').classList.remove('active');
+            currentAuthor = null;
+        }
+
+        async function loadAuthorMedia(append = false) {
+            if (!currentAuthor || isLoadingAuthorMedia || (!authorMediaHasMore && append)) return;
+
+            if (!append) {
+                authorMediaOffset = 0;
+                authorMediaHasMore = true;
+                authorMediaItems = [];
+                document.getElementById('author-media-grid').innerHTML = '';
+            }
+
+            isLoadingAuthorMedia = true;
+            const loader = document.getElementById('author-media-loader');
+            loader.classList.remove('hidden');
+
+            const sort = document.getElementById('author-media-sort').value;
+
+            try {
+                const url = `/api/authors/${encodeURIComponent(currentAuthor)}/media?limit=50&offset=${authorMediaOffset}&sort=${sort}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.files && data.files.length > 0) {
+                    authorMediaItems = authorMediaItems.concat(data.files);
+                    appendAuthorMedia(data.files);
+                    authorMediaOffset += data.files.length;
+                }
+
+                if (authorMediaOffset >= data.total || data.files.length < 50) {
+                    authorMediaHasMore = false;
+                }
+
+                loader.classList.add('hidden');
+            } catch (err) {
+                console.error('Failed to load author media:', err);
+                loader.classList.add('hidden');
+            } finally {
+                isLoadingAuthorMedia = false;
+            }
+        }
+
+        function appendAuthorMedia(files) {
+            const container = document.getElementById('author-media-grid');
+
+            const html = files.map(item => {
+                const filename = item.local_path ? item.local_path.split('/').pop() : '';
+                const isVideo = item.media_type === 'video' || filename.endsWith('.mp4');
+                const thumbSrc = isVideo ? `/api/media/thumb/${filename}` : `/api/media/file/${filename}`;
+
+                return `
+                    <div class="author-media-item" onclick="openMediaFromAuthor('${item.id}')">
+                        <img src="${thumbSrc}" loading="lazy"
+                            onerror="this.outerHTML='<div style=\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#343536;font-size:32px;\\'>${isVideo ? '🎬' : '🖼️'}</div>'">
+                        ${isVideo ? '<div style="position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px;font-size:10px;">VIDEO</div>' : ''}
+                    </div>
+                `;
+            }).join('');
+
+            container.insertAdjacentHTML('beforeend', html);
+        }
+
+        function openMediaFromAuthor(itemId) {
+            const item = authorMediaItems.find(i => i.id === itemId);
+            if (item) {
+                // Close author modal and open media modal
+                document.getElementById('author-modal').classList.remove('active');
+                // Use the main gallery's modal
+                currentItem = item;
+                galleryItems = authorMediaItems;
+                currentItemIndex = authorMediaItems.findIndex(i => i.id === itemId);
+                updateModalContent();
+                updateModalNavigation();
+                document.getElementById('media-modal').classList.add('active');
             }
         }
 

@@ -5,8 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Query
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Query, Header
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -302,15 +302,18 @@ async def get_media_files(
     """
     db = Database()
 
+    # Get list of favorite authors (authors with at least one favorited post)
+    fav_authors_list = db.get_favorite_authors()
+    fav_authors_set = set(a.lower() for a in fav_authors_list) if fav_authors_list else set()
+
     if favorites_only:
         files = db.get_favorites(limit, offset)
         total = db.count_favorites()
     elif favorite_authors:
         # Get posts from authors who have been favorited
-        fav_authors = db.get_favorite_authors()
-        if fav_authors:
-            files = db.get_media_by_authors(fav_authors, limit, offset, subreddit, media_type)
-            total = db.count_media_by_authors(fav_authors, subreddit, media_type)
+        if fav_authors_list:
+            files = db.get_media_by_authors(fav_authors_list, limit, offset, subreddit, media_type)
+            total = db.count_media_by_authors(fav_authors_list, subreddit, media_type)
         else:
             files = []
             total = 0
@@ -324,6 +327,11 @@ async def get_media_files(
         # Add is_favorite flag to each file
         for f in files:
             f["is_favorite"] = db.is_favorite(f["id"])
+
+    # Add is_author_favorite flag to all files
+    for f in files:
+        author = f.get("author", "")
+        f["is_author_favorite"] = author.lower() in fav_authors_set if author else False
 
     return {
         "files": files,
@@ -341,13 +349,79 @@ async def get_media_subreddits():
 
 
 @app.get("/api/media/file/{filename:path}")
-async def get_media_file(filename: str):
-    """Serve a media file."""
+async def get_media_file(filename: str, range: Optional[str] = Header(None)):
+    """Serve a media file with Range request support for video streaming."""
     file_path = DOWNLOADS_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(file_path)
+    file_size = file_path.stat().st_size
+
+    # Determine media type
+    suffix = file_path.suffix.lower()
+    media_types = {
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+    }
+    media_type = media_types.get(suffix, 'application/octet-stream')
+
+    # For non-video files or no Range header, return full file
+    # Include Accept-Ranges header so browsers know Range requests are supported
+    if not range or not suffix in ('.mp4', '.webm', '.mov', '.avi', '.mkv'):
+        return FileResponse(
+            file_path,
+            media_type=media_type,
+            headers={"Accept-Ranges": "bytes"}
+        )
+
+    # Parse Range header (e.g., "bytes=0-1023")
+    try:
+        range_str = range.replace("bytes=", "")
+        range_parts = range_str.split("-")
+        start = int(range_parts[0]) if range_parts[0] else 0
+        end = int(range_parts[1]) if range_parts[1] else file_size - 1
+    except (ValueError, IndexError):
+        start = 0
+        end = file_size - 1
+
+    # Ensure valid range
+    start = max(0, min(start, file_size - 1))
+    end = max(start, min(end, file_size - 1))
+    content_length = end - start + 1
+
+    def iterfile():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = content_length
+            chunk_size = 64 * 1024  # 64KB chunks
+            while remaining > 0:
+                read_size = min(chunk_size, remaining)
+                data = f.read(read_size)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(content_length),
+    }
+
+    return StreamingResponse(
+        iterfile(),
+        status_code=206,
+        media_type=media_type,
+        headers=headers
+    )
 
 
 def generate_thumbnail(video_path: Path) -> Optional[Path]:
@@ -793,6 +867,53 @@ async def sync_favorite_authors_to_users():
         "synced": len(added),
         "added_users": added,
         "message": f"Added {len(added)} users to collection targets"
+    }
+
+
+# Authors endpoints
+
+@app.get("/api/authors")
+async def get_authors(
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    favorites_only: bool = Query(default=False),
+    sort: str = Query(default="count")
+):
+    """Get list of authors with stats and thumbnails."""
+    db = Database()
+    authors = db.get_authors_with_stats(limit, offset, favorites_only, sort)
+    total = db.count_authors(favorites_only)
+
+    return {
+        "authors": authors,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@app.get("/api/authors/{author}/media")
+async def get_author_media(
+    author: str,
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    sort: str = Query(default="newest")
+):
+    """Get all media from a specific author."""
+    db = Database()
+    files = db.get_media_by_authors([author], limit, offset, sort=sort)
+    total = db.count_media_by_authors([author])
+
+    # Add is_favorite flag
+    for f in files:
+        f["is_favorite"] = db.is_favorite(f["id"])
+
+    return {
+        "files": files,
+        "total": total,
+        "author": author,
+        "limit": limit,
+        "offset": offset
     }
 
 

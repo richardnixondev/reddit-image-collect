@@ -161,6 +161,15 @@ class Database:
             )
             conn.commit()
 
+    def update_media_type(self, post_id: str, media_type: str) -> None:
+        """Update the media_type for a post."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE posts SET media_type = ? WHERE id = ?",
+                (media_type, post_id),
+            )
+            conn.commit()
+
     def get_post(self, post_id: str) -> Optional[PostRecord]:
         """Get a post record by ID."""
         with self._get_connection() as conn:
@@ -683,7 +692,8 @@ class Database:
         limit: int = 50,
         offset: int = 0,
         subreddit: str = None,
-        media_type: str = None
+        media_type: str = None,
+        sort: str = "newest"
     ) -> list[dict]:
         """Get media files from specific authors."""
         if not authors:
@@ -711,7 +721,17 @@ class Database:
                 query += " AND media_type = ?"
                 params.append(media_type)
 
-            query += " ORDER BY downloaded_at DESC LIMIT ? OFFSET ?"
+            # Add sorting
+            if sort == "oldest":
+                query += " ORDER BY created_utc ASC"
+            elif sort == "score_high":
+                query += " ORDER BY score DESC"
+            elif sort == "score_low":
+                query += " ORDER BY score ASC"
+            else:  # newest
+                query += " ORDER BY created_utc DESC"
+
+            query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
             cursor = conn.execute(query, params)
@@ -748,4 +768,131 @@ class Database:
                 params.append(media_type)
 
             cursor = conn.execute(query, params)
+            return cursor.fetchone()[0]
+
+    def get_authors_with_stats(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        favorites_only: bool = False,
+        sort: str = "count"
+    ) -> list[dict]:
+        """Get list of authors with their media counts and a sample thumbnail.
+
+        Args:
+            sort: 'count' (most media), 'name' (alphabetical), 'recent' (most recent)
+        """
+        with self._get_connection() as conn:
+            # Build the query based on filters
+            if favorites_only:
+                # Only authors who have favorited posts
+                query = """
+                    SELECT
+                        p.author,
+                        COUNT(*) as media_count,
+                        MAX(p.score) as max_score,
+                        SUM(p.score) as total_score,
+                        MAX(p.created_utc) as latest_post,
+                        (SELECT local_path FROM posts p2
+                         WHERE p2.author = p.author
+                         AND p2.local_path IS NOT NULL
+                         ORDER BY p2.score DESC LIMIT 1) as thumb_path
+                    FROM posts p
+                    WHERE p.author IS NOT NULL
+                      AND p.author != '[deleted]'
+                      AND p.author != 'deleted'
+                      AND p.local_path IS NOT NULL
+                      AND p.downloaded_at IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1 FROM favorites f
+                          JOIN posts fp ON f.post_id = fp.id
+                          WHERE fp.author = p.author
+                      )
+                    GROUP BY p.author
+                """
+            else:
+                query = """
+                    SELECT
+                        p.author,
+                        COUNT(*) as media_count,
+                        MAX(p.score) as max_score,
+                        SUM(p.score) as total_score,
+                        MAX(p.created_utc) as latest_post,
+                        (SELECT local_path FROM posts p2
+                         WHERE p2.author = p.author
+                         AND p2.local_path IS NOT NULL
+                         ORDER BY p2.score DESC LIMIT 1) as thumb_path
+                    FROM posts p
+                    WHERE p.author IS NOT NULL
+                      AND p.author != '[deleted]'
+                      AND p.author != 'deleted'
+                      AND p.local_path IS NOT NULL
+                      AND p.downloaded_at IS NOT NULL
+                    GROUP BY p.author
+                """
+
+            # Add sorting
+            if sort == "name":
+                query += " ORDER BY LOWER(p.author) ASC"
+            elif sort == "recent":
+                query += " ORDER BY latest_post DESC"
+            else:  # count
+                query += " ORDER BY media_count DESC"
+
+            query += " LIMIT ? OFFSET ?"
+
+            cursor = conn.execute(query, (limit, offset))
+            rows = cursor.fetchall()
+
+            # Check if each author has favorited posts
+            authors = []
+            for row in rows:
+                author_name = row[0]
+                # Check if author has any favorited posts
+                fav_cursor = conn.execute("""
+                    SELECT COUNT(*) FROM favorites f
+                    JOIN posts p ON f.post_id = p.id
+                    WHERE p.author = ?
+                """, (author_name,))
+                fav_count = fav_cursor.fetchone()[0]
+
+                authors.append({
+                    "author": author_name,
+                    "media_count": row[1],
+                    "max_score": row[2],
+                    "total_score": row[3],
+                    "latest_post": row[4],
+                    "thumb_path": row[5],
+                    "is_favorite": fav_count > 0
+                })
+
+            return authors
+
+    def count_authors(self, favorites_only: bool = False) -> int:
+        """Count total unique authors."""
+        with self._get_connection() as conn:
+            if favorites_only:
+                query = """
+                    SELECT COUNT(DISTINCT p.author)
+                    FROM posts p
+                    WHERE p.author IS NOT NULL
+                      AND p.author != '[deleted]'
+                      AND p.author != 'deleted'
+                      AND p.local_path IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1 FROM favorites f
+                          JOIN posts fp ON f.post_id = fp.id
+                          WHERE fp.author = p.author
+                      )
+                """
+            else:
+                query = """
+                    SELECT COUNT(DISTINCT author)
+                    FROM posts
+                    WHERE author IS NOT NULL
+                      AND author != '[deleted]'
+                      AND author != 'deleted'
+                      AND local_path IS NOT NULL
+                """
+            cursor = conn.execute(query)
             return cursor.fetchone()[0]
