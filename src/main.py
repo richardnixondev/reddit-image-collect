@@ -144,25 +144,6 @@ def process_post(
         # Determine gallery index
         gallery_index = idx + 1 if len(media_urls) > 1 else None
 
-        record = PostRecord(
-            id=item_id,
-            subreddit=post.subreddit,
-            author=post.author,
-            title=post.title,
-            url=post.url,
-            media_url=final_url,
-            media_type=final_type,
-            score=post.score,
-            created_utc=post.created_utc,
-            downloaded_at=None,
-            local_path=None,
-            file_hash=None,
-            permalink=post.permalink,
-            source_type=source_type,
-            flair=post.flair,
-        )
-        db.add_post(record)
-
         # Create metadata for download
         download_meta = DownloadMetadata(
             subreddit=post.subreddit,
@@ -178,43 +159,66 @@ def process_post(
             source_type=source_type,
         )
 
+        # Try to download first - only add to database if successful
         local_path, file_hash = downloader.download(final_url, download_meta)
 
-        if local_path and file_hash:
-            existing = db.hash_exists(file_hash)
-            if existing:
-                logger.info(f"Duplicate detected for {item_id}, keeping existing")
-                os.remove(local_path)
-                stats.skipped_exists += 1
-                continue
+        if not local_path or not file_hash:
+            stats.skipped_no_media += 1
+            logger.debug(f"Skipping {item_id}: download failed")
+            continue
 
-            # Correct media_type based on actual file extension
-            ext = os.path.splitext(local_path)[1].lower()
-            actual_type = final_type
-            if ext in ('.jpg', '.jpeg', '.png', '.webp'):
-                actual_type = 'image'
-            elif ext == '.gif':
-                actual_type = 'gif'
-            elif ext in ('.mp4', '.webm', '.mov'):
-                actual_type = 'video'
+        # Check for duplicates by hash
+        existing = db.hash_exists(file_hash)
+        if existing:
+            logger.info(f"Duplicate detected for {item_id}, keeping existing")
+            os.remove(local_path)
+            stats.skipped_exists += 1
+            continue
 
-            if actual_type != final_type:
-                logger.debug(f"Corrected media_type for {item_id}: {final_type} -> {actual_type}")
-                db.update_media_type(item_id, actual_type)
+        # Correct media_type based on actual file extension
+        ext = os.path.splitext(local_path)[1].lower()
+        actual_type = final_type
+        if ext in ('.jpg', '.jpeg', '.png', '.webp'):
+            actual_type = 'image'
+        elif ext == '.gif':
+            actual_type = 'gif'
+        elif ext in ('.mp4', '.webm', '.mov'):
+            actual_type = 'video'
 
-            db.mark_downloaded(item_id, local_path, file_hash)
-            stats.downloaded += 1
-            if len(media_urls) > 1:
-                logger.info(
-                    f"Downloaded: {item_id} from r/{post.subreddit} ({final_type}) "
-                    f"[{idx + 1}/{len(media_urls)}]"
-                )
-            else:
-                logger.info(
-                    f"Downloaded: {item_id} from r/{post.subreddit} ({final_type})"
-                )
+        if actual_type != final_type:
+            logger.debug(f"Corrected media_type for {item_id}: {final_type} -> {actual_type}")
+
+        # Now add to database with correct info (only after successful download)
+        record = PostRecord(
+            id=item_id,
+            subreddit=post.subreddit,
+            author=post.author,
+            title=post.title,
+            url=post.url,
+            media_url=final_url,
+            media_type=actual_type,
+            score=post.score,
+            created_utc=post.created_utc,
+            downloaded_at=None,
+            local_path=None,
+            file_hash=None,
+            permalink=post.permalink,
+            source_type=source_type,
+            flair=post.flair,
+        )
+        db.add_post(record)
+        db.mark_downloaded(item_id, local_path, file_hash)
+
+        stats.downloaded += 1
+        if len(media_urls) > 1:
+            logger.info(
+                f"Downloaded: {item_id} from r/{post.subreddit} ({actual_type}) "
+                f"[{idx + 1}/{len(media_urls)}]"
+            )
         else:
-            stats.errors += 1
+            logger.info(
+                f"Downloaded: {item_id} from r/{post.subreddit} ({actual_type})"
+            )
 
 
 def collect(config: Config, logger) -> CollectionStats:
