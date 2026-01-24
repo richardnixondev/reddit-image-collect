@@ -86,6 +86,18 @@ class Database:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_downloaded ON posts(downloaded_at)"
             )
+            # Scheduler history table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduler_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at TIMESTAMP,
+                    finished_at TIMESTAMP,
+                    status TEXT,
+                    posts_processed INTEGER DEFAULT 0,
+                    posts_downloaded INTEGER DEFAULT 0,
+                    error_message TEXT
+                )
+            """)
             conn.commit()
 
     @contextmanager
@@ -896,3 +908,66 @@ class Database:
                 """
             cursor = conn.execute(query)
             return cursor.fetchone()[0]
+
+    # Scheduler history methods
+
+    def add_scheduler_run(self, started_at: datetime) -> int:
+        """Start a new scheduler run. Returns the run ID."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO scheduler_history (started_at, status) VALUES (?, 'running')",
+                (started_at,)
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def finish_scheduler_run(
+        self,
+        run_id: int,
+        status: str,
+        posts_processed: int = 0,
+        posts_downloaded: int = 0,
+        error_message: str = None
+    ) -> None:
+        """Finish a scheduler run with results."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE scheduler_history
+                SET finished_at = ?, status = ?, posts_processed = ?,
+                    posts_downloaded = ?, error_message = ?
+                WHERE id = ?
+                """,
+                (datetime.now(), status, posts_processed, posts_downloaded, error_message, run_id)
+            )
+            conn.commit()
+
+    def get_scheduler_history(self, limit: int = 20) -> list[dict]:
+        """Get recent scheduler run history."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, started_at, finished_at, status,
+                       posts_processed, posts_downloaded, error_message
+                FROM scheduler_history
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_last_scheduler_run(self) -> Optional[dict]:
+        """Get the most recent scheduler run."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, started_at, finished_at, status,
+                       posts_processed, posts_downloaded, error_message
+                FROM scheduler_history
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None

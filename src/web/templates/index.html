@@ -1572,6 +1572,61 @@
                         Adiciona todos os autores de posts favoritos na lista de users para coleta
                     </small>
                 </div>
+
+                <h2 style="margin-top: 30px;">Agendamento Automatico</h2>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="scheduler-enabled" style="width: auto;">
+                        Ativar agendamento automatico
+                    </label>
+                    <small style="color: #818384; margin-left: 26px;">Substitui o cron por agendamento interno</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Modo de Agendamento</label>
+                    <select id="scheduler-mode" onchange="toggleSchedulerMode()">
+                        <option value="interval">A cada X horas</option>
+                        <option value="specific">Horarios especificos</option>
+                    </select>
+                </div>
+
+                <div id="scheduler-interval-group" class="form-group">
+                    <label>Intervalo (horas)</label>
+                    <select id="scheduler-interval">
+                        <option value="2">A cada 2 horas</option>
+                        <option value="4">A cada 4 horas</option>
+                        <option value="6" selected>A cada 6 horas</option>
+                        <option value="8">A cada 8 horas</option>
+                        <option value="12">A cada 12 horas</option>
+                        <option value="24">A cada 24 horas</option>
+                    </select>
+                </div>
+
+                <div id="scheduler-times-group" class="form-group" style="display: none;">
+                    <label>Horarios (separados por virgula)</label>
+                    <input type="text" id="scheduler-times" value="00:00, 06:00, 12:00, 18:00" placeholder="00:00, 06:00, 12:00, 18:00">
+                    <small style="color: #818384;">Formato: HH:MM (ex: 00:00, 06:00, 12:00, 18:00)</small>
+                </div>
+
+                <div class="form-group" style="margin-top: 15px;">
+                    <div id="scheduler-status" style="padding: 10px; background: #1a1a1b; border-radius: 4px;">
+                        <span id="scheduler-status-indicator" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #818384; margin-right: 8px;"></span>
+                        <span id="scheduler-status-text">Carregando...</span>
+                    </div>
+                </div>
+
+                <button class="btn-add" onclick="saveSchedulerSettings()" style="margin-top: 10px;">
+                    Salvar Agendamento
+                </button>
+
+                <button class="btn-add" onclick="runSchedulerNow()" style="margin-top: 10px; background: #0079d3;">
+                    Executar Agora
+                </button>
+
+                <h3 style="margin-top: 25px; font-size: 14px; color: #818384;">Historico de Execucoes</h3>
+                <div id="scheduler-history" style="margin-top: 10px; max-height: 200px; overflow-y: auto;">
+                    <p style="color: #818384;">Carregando historico...</p>
+                </div>
             </div>
         </div>
     </div>
@@ -1621,6 +1676,7 @@
             }
             if (tab === 'settings') {
                 loadSettings();
+                loadSchedulerStatus();
             }
         }
 
@@ -2736,8 +2792,10 @@
                     loadStats();
                     loadRecentDownloads();
 
-                    // Suggest adding author to blacklist
-                    if (author && author !== 'deleted' && author !== '[deleted]') {
+                    // Suggest adding author to blacklist (skip for videos)
+                    const mediaType = currentItem ? currentItem.media_type : null;
+                    const isVideo = mediaType === 'video' || mediaType === 'gif';
+                    if (!isVideo && author && author !== 'deleted' && author !== '[deleted]') {
                         const addToBlacklist = confirm(`Deseja adicionar u/${author} na blacklist?\n\nIsso impedira que novas midias deste usuario sejam baixadas.`);
                         if (addToBlacklist) {
                             await addAuthorToBlacklist(author);
@@ -2887,6 +2945,157 @@
                     }
                 } else {
                     showAlert(result.detail || 'Erro ao sincronizar', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        // Scheduler functions
+        function toggleSchedulerMode() {
+            const mode = document.getElementById('scheduler-mode').value;
+            document.getElementById('scheduler-interval-group').style.display = mode === 'interval' ? 'block' : 'none';
+            document.getElementById('scheduler-times-group').style.display = mode === 'specific' ? 'block' : 'none';
+        }
+
+        async function loadSchedulerStatus() {
+            try {
+                const response = await fetch('/api/scheduler/status');
+                const status = await response.json();
+
+                document.getElementById('scheduler-enabled').checked = status.enabled;
+                document.getElementById('scheduler-mode').value = status.mode;
+                document.getElementById('scheduler-interval').value = status.interval_hours;
+                if (status.specific_times) {
+                    document.getElementById('scheduler-times').value = status.specific_times.join(', ');
+                }
+                toggleSchedulerMode();
+
+                // Update status display
+                const indicator = document.getElementById('scheduler-status-indicator');
+                const statusText = document.getElementById('scheduler-status-text');
+
+                if (status.is_running) {
+                    indicator.style.background = '#ffa500';
+                    statusText.textContent = 'Executando...';
+                } else if (status.enabled && status.next_run) {
+                    indicator.style.background = '#4caf50';
+                    const nextRun = new Date(status.next_run);
+                    statusText.textContent = `Ativo - Proxima execucao: ${nextRun.toLocaleString('pt-BR')}`;
+                } else if (status.enabled) {
+                    indicator.style.background = '#4caf50';
+                    statusText.textContent = 'Ativo';
+                } else {
+                    indicator.style.background = '#818384';
+                    statusText.textContent = 'Desativado';
+                }
+
+                // Load history
+                loadSchedulerHistory();
+            } catch (err) {
+                console.error('Failed to load scheduler status:', err);
+            }
+        }
+
+        async function loadSchedulerHistory() {
+            try {
+                const response = await fetch('/api/scheduler/history?limit=10');
+                const history = await response.json();
+
+                const container = document.getElementById('scheduler-history');
+                if (history.length === 0) {
+                    container.innerHTML = '<p style="color: #818384;">Nenhuma execucao registrada</p>';
+                    return;
+                }
+
+                let html = '<table style="width: 100%; font-size: 12px; border-collapse: collapse;">';
+                html += '<tr style="color: #818384; border-bottom: 1px solid #343536;"><th style="text-align: left; padding: 5px;">Data/Hora</th><th style="text-align: left; padding: 5px;">Duracao</th><th style="text-align: left; padding: 5px;">Status</th><th style="text-align: right; padding: 5px;">Downloads</th></tr>';
+
+                history.forEach(run => {
+                    const startDate = new Date(run.started_at);
+                    let duration = '-';
+                    if (run.finished_at) {
+                        const endDate = new Date(run.finished_at);
+                        const diffMs = endDate - startDate;
+                        const diffMins = Math.floor(diffMs / 60000);
+                        const diffSecs = Math.floor((diffMs % 60000) / 1000);
+                        duration = diffMins > 0 ? `${diffMins}m ${diffSecs}s` : `${diffSecs}s`;
+                    }
+
+                    let statusColor = '#818384';
+                    let statusLabel = run.status;
+                    if (run.status === 'success') {
+                        statusColor = '#4caf50';
+                        statusLabel = 'Sucesso';
+                    } else if (run.status === 'error') {
+                        statusColor = '#ea0027';
+                        statusLabel = 'Erro';
+                    } else if (run.status === 'running') {
+                        statusColor = '#ffa500';
+                        statusLabel = 'Executando';
+                    } else if (run.status === 'timeout') {
+                        statusColor = '#ffa500';
+                        statusLabel = 'Timeout';
+                    }
+
+                    html += `<tr style="border-bottom: 1px solid #343536;">
+                        <td style="padding: 5px;">${startDate.toLocaleString('pt-BR')}</td>
+                        <td style="padding: 5px;">${duration}</td>
+                        <td style="padding: 5px; color: ${statusColor};">${statusLabel}</td>
+                        <td style="padding: 5px; text-align: right;">${run.posts_downloaded || 0}</td>
+                    </tr>`;
+                });
+
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load scheduler history:', err);
+            }
+        }
+
+        async function saveSchedulerSettings() {
+            const mode = document.getElementById('scheduler-mode').value;
+            const timesStr = document.getElementById('scheduler-times').value;
+            const times = timesStr.split(',').map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}$/.test(t));
+
+            const config = {
+                enabled: document.getElementById('scheduler-enabled').checked,
+                interval_hours: parseInt(document.getElementById('scheduler-interval').value),
+                mode: mode,
+                specific_times: times.length > 0 ? times : ["00:00", "06:00", "12:00", "18:00"]
+            };
+
+            try {
+                const response = await fetch('/api/scheduler/config', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+
+                if (response.ok) {
+                    showAlert('Agendamento salvo!', 'success');
+                    loadSchedulerStatus();
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Erro ao salvar', 'error');
+                }
+            } catch (err) {
+                showAlert('Erro de conexao', 'error');
+            }
+        }
+
+        async function runSchedulerNow() {
+            try {
+                const response = await fetch('/api/scheduler/run-now', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showAlert('Coleta iniciada!', 'success');
+                    loadSchedulerStatus();
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Erro ao iniciar', 'error');
                 }
             } catch (err) {
                 showAlert('Erro de conexao', 'error');

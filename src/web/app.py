@@ -1,7 +1,10 @@
 """FastAPI web application for managing Reddit Image Collector."""
 
 import os
+import re
 import subprocess
+from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +14,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
 from . import config_manager
 
 # Import database
@@ -19,7 +27,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.database import Database
 
 
-app = FastAPI(title="Reddit Image Collector", version="1.0.0")
+# Scheduler configuration
+SCHEDULER_DB_PATH = Path(__file__).parent.parent.parent / "scheduler.db"
+jobstores = {
+    'default': SQLAlchemyJobStore(url=f'sqlite:///{SCHEDULER_DB_PATH}')
+}
+scheduler = BackgroundScheduler(jobstores=jobstores, timezone='America/Sao_Paulo')
+
+# Scheduler state
+scheduler_config = {
+    "enabled": False,
+    "interval_hours": 6,
+    "mode": "interval"  # 'interval' or 'specific_times'
+}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager for FastAPI app."""
+    # Startup
+    scheduler.start()
+    # Load saved scheduler config and restore job if enabled
+    _load_scheduler_config()
+    if scheduler_config["enabled"]:
+        _setup_scheduler_job()
+    yield
+    # Shutdown
+    scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Reddit Image Collector", version="1.0.0", lifespan=lifespan)
 
 # Downloads directory for serving media files
 DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
@@ -34,6 +71,130 @@ collector_status = {
     "last_run": None,
     "last_result": None
 }
+
+# Scheduler config file path
+SCHEDULER_CONFIG_PATH = Path(__file__).parent.parent.parent / "scheduler_config.yaml"
+
+
+def _load_scheduler_config():
+    """Load scheduler configuration from YAML file."""
+    import yaml
+    if SCHEDULER_CONFIG_PATH.exists():
+        with open(SCHEDULER_CONFIG_PATH, 'r') as f:
+            config = yaml.safe_load(f) or {}
+            scheduler_config["enabled"] = config.get("enabled", False)
+            scheduler_config["interval_hours"] = config.get("interval_hours", 6)
+            scheduler_config["mode"] = config.get("mode", "interval")
+            scheduler_config["specific_times"] = config.get("specific_times", ["00:00", "06:00", "12:00", "18:00"])
+
+
+def _save_scheduler_config():
+    """Save scheduler configuration to YAML file."""
+    import yaml
+    with open(SCHEDULER_CONFIG_PATH, 'w') as f:
+        yaml.dump({
+            "enabled": scheduler_config["enabled"],
+            "interval_hours": scheduler_config["interval_hours"],
+            "mode": scheduler_config["mode"],
+            "specific_times": scheduler_config.get("specific_times", ["00:00", "06:00", "12:00", "18:00"])
+        }, f)
+
+
+def _setup_scheduler_job():
+    """Setup or update the scheduler job based on current config."""
+    # Remove existing job if any
+    try:
+        scheduler.remove_job('collector_job')
+    except:
+        pass
+
+    if not scheduler_config["enabled"]:
+        return
+
+    if scheduler_config["mode"] == "interval":
+        # Run at fixed interval
+        trigger = IntervalTrigger(hours=scheduler_config["interval_hours"])
+        scheduler.add_job(
+            run_collector_scheduled,
+            trigger=trigger,
+            id='collector_job',
+            name='Reddit Collector',
+            replace_existing=True
+        )
+    else:
+        # Run at specific times - use CronTrigger for each time
+        times = scheduler_config.get("specific_times", ["00:00", "06:00", "12:00", "18:00"])
+        if times:
+            # Create a cron expression for the specific hours
+            hours = []
+            for t in times:
+                try:
+                    h, m = t.split(":")
+                    hours.append(int(h))
+                except:
+                    pass
+            if hours:
+                hours_str = ",".join(str(h) for h in sorted(set(hours)))
+                trigger = CronTrigger(hour=hours_str, minute=0)
+                scheduler.add_job(
+                    run_collector_scheduled,
+                    trigger=trigger,
+                    id='collector_job',
+                    name='Reddit Collector',
+                    replace_existing=True
+                )
+
+
+def run_collector_scheduled():
+    """Run collector from scheduler (records to history)."""
+    if collector_status["running"]:
+        return  # Skip if already running
+
+    db = Database()
+    run_id = db.add_scheduler_run(datetime.now())
+
+    collector_status["running"] = True
+    collector_status["last_run"] = datetime.now().isoformat()
+
+    posts_processed = 0
+    posts_downloaded = 0
+
+    try:
+        project_dir = Path(__file__).parent.parent.parent
+        result = subprocess.run(
+            ["python3", "-m", "src.main"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=14400  # 4 hours max
+        )
+
+        # Try to parse stats from output
+        if result.stdout:
+            # Look for patterns like "Posts processed: 123" and "New downloads: 45"
+            processed_match = re.search(r'Posts processed:\s*(\d+)', result.stdout)
+            downloaded_match = re.search(r'New downloads:\s*(\d+)', result.stdout)
+            if processed_match:
+                posts_processed = int(processed_match.group(1))
+            if downloaded_match:
+                posts_downloaded = int(downloaded_match.group(1))
+
+        if result.returncode == 0:
+            collector_status["last_result"] = "success"
+            db.finish_scheduler_run(run_id, "success", posts_processed, posts_downloaded)
+        else:
+            collector_status["last_result"] = "error"
+            db.finish_scheduler_run(run_id, "error", posts_processed, posts_downloaded, result.stderr[:500] if result.stderr else None)
+
+    except subprocess.TimeoutExpired:
+        collector_status["last_result"] = "timeout"
+        db.finish_scheduler_run(run_id, "timeout", posts_processed, posts_downloaded, "Execution timed out after 4 hours")
+    except Exception as e:
+        collector_status["last_result"] = f"error: {str(e)}"
+        db.finish_scheduler_run(run_id, "error", posts_processed, posts_downloaded, str(e)[:500])
+    finally:
+        collector_status["running"] = False
+
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -779,6 +940,68 @@ async def trigger_collector(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(run_collector)
     return {"message": "Collector started"}
+
+
+# Scheduler endpoints
+
+class SchedulerConfigUpdate(BaseModel):
+    enabled: bool
+    interval_hours: int = 6
+    mode: str = "interval"
+    specific_times: list[str] = ["00:00", "06:00", "12:00", "18:00"]
+
+
+@app.get("/api/scheduler/status")
+async def get_scheduler_status():
+    """Get scheduler status including next run time."""
+    job = scheduler.get_job('collector_job')
+    next_run = None
+    if job and job.next_run_time:
+        next_run = job.next_run_time.isoformat()
+
+    db = Database()
+    last_run = db.get_last_scheduler_run()
+
+    return {
+        "enabled": scheduler_config["enabled"],
+        "interval_hours": scheduler_config["interval_hours"],
+        "mode": scheduler_config["mode"],
+        "specific_times": scheduler_config.get("specific_times", ["00:00", "06:00", "12:00", "18:00"]),
+        "next_run": next_run,
+        "is_running": collector_status["running"],
+        "last_run": last_run
+    }
+
+
+@app.put("/api/scheduler/config")
+async def update_scheduler_config(config: SchedulerConfigUpdate):
+    """Update scheduler configuration."""
+    scheduler_config["enabled"] = config.enabled
+    scheduler_config["interval_hours"] = config.interval_hours
+    scheduler_config["mode"] = config.mode
+    scheduler_config["specific_times"] = config.specific_times
+
+    _save_scheduler_config()
+    _setup_scheduler_job()
+
+    return {"message": "Scheduler configuration updated", "config": scheduler_config}
+
+
+@app.get("/api/scheduler/history")
+async def get_scheduler_history(limit: int = Query(default=20, le=100)):
+    """Get scheduler run history."""
+    db = Database()
+    return db.get_scheduler_history(limit)
+
+
+@app.post("/api/scheduler/run-now")
+async def run_scheduler_now(background_tasks: BackgroundTasks):
+    """Trigger an immediate scheduler run."""
+    if collector_status["running"]:
+        raise HTTPException(status_code=409, detail="Collector is already running")
+
+    background_tasks.add_task(run_collector_scheduled)
+    return {"message": "Collector started (scheduled run)"}
 
 
 # Favorites endpoints
