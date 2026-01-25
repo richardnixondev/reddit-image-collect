@@ -431,7 +431,7 @@ class Database:
 
     def get_media_files(self, limit: int = 50, offset: int = 0,
                         subreddit: str = None, media_type: str = None,
-                        sort: str = "newest") -> list[dict]:
+                        sort: str = "newest", author: str = None) -> list[dict]:
         """Get media files with optional filtering and sorting.
 
         Args:
@@ -454,6 +454,10 @@ class Database:
                 query += " AND media_type = ?"
                 params.append(media_type)
 
+            if author:
+                query += " AND LOWER(author) = LOWER(?)"
+                params.append(author)
+
             # Apply sorting
             if sort == "oldest":
                 query += " ORDER BY created_utc ASC"
@@ -470,7 +474,7 @@ class Database:
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_total_media_count(self, subreddit: str = None, media_type: str = None) -> int:
+    def get_total_media_count(self, subreddit: str = None, media_type: str = None, author: str = None) -> int:
         """Get total count of media files with optional filtering."""
         with self._get_connection() as conn:
             query = """
@@ -488,6 +492,10 @@ class Database:
                 query += " AND media_type = ?"
                 params.append(media_type)
 
+            if author:
+                query += " AND LOWER(author) = LOWER(?)"
+                params.append(author)
+
             return conn.execute(query, params).fetchone()[0]
 
     def get_all_subreddits(self) -> list[str]:
@@ -499,6 +507,22 @@ class Database:
                 FROM posts
                 WHERE downloaded_at IS NOT NULL
                 ORDER BY subreddit
+                """
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    def get_all_authors(self) -> list[str]:
+        """Get list of all authors with downloaded content."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT DISTINCT author
+                FROM posts
+                WHERE downloaded_at IS NOT NULL
+                  AND author IS NOT NULL
+                  AND author != ''
+                  AND author != 'deleted'
+                ORDER BY author
                 """
             )
             return [row[0] for row in cursor.fetchall()]

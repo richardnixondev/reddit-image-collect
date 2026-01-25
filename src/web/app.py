@@ -452,6 +452,7 @@ async def get_media_files(
     offset: int = Query(default=0, ge=0),
     subreddit: Optional[str] = None,
     media_type: Optional[str] = None,
+    author: Optional[str] = None,
     sort: str = Query(default="newest"),
     favorites_only: bool = Query(default=False),
     favorite_authors: bool = Query(default=False)
@@ -482,8 +483,8 @@ async def get_media_files(
         for f in files:
             f["is_favorite"] = db.is_favorite(f["id"])
     else:
-        files = db.get_media_files(limit, offset, subreddit, media_type, sort)
-        total = db.get_total_media_count(subreddit, media_type)
+        files = db.get_media_files(limit, offset, subreddit, media_type, sort, author)
+        total = db.get_total_media_count(subreddit, media_type, author)
 
         # Add is_favorite flag to each file
         for f in files:
@@ -507,6 +508,13 @@ async def get_media_subreddits():
     """Get list of subreddits with downloaded content."""
     db = Database()
     return db.get_all_subreddits()
+
+
+@app.get("/api/media/authors")
+async def get_media_authors():
+    """Get list of authors with downloaded content."""
+    db = Database()
+    return db.get_all_authors()
 
 
 @app.get("/api/media/file/{filename:path}")
@@ -1002,6 +1010,150 @@ async def run_scheduler_now(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(run_collector_scheduled)
     return {"message": "Collector started (scheduled run)"}
+
+
+# Individual collection endpoints
+
+class IndividualCollectRequest(BaseModel):
+    target_type: str  # 'user' or 'subreddit'
+    target_name: str
+    media_types: list[str] = ["image"]
+    limit: int = 100
+
+
+def run_individual_collection(target_type: str, target_name: str, media_types: list[str], limit: int):
+    """Run collection for a single user or subreddit."""
+    import tempfile
+    import yaml
+
+    if collector_status["running"]:
+        return
+
+    db = Database()
+    run_id = db.add_scheduler_run(datetime.now())
+
+    collector_status["running"] = True
+    collector_status["last_run"] = datetime.now().isoformat()
+
+    posts_processed = 0
+    posts_downloaded = 0
+
+    try:
+        # Create temporary config for this specific collection
+        project_dir = Path(__file__).parent.parent.parent
+
+        # Load base config
+        base_config_path = project_dir / "config.yaml"
+        with open(base_config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        # Modify for individual collection
+        if target_type == 'user':
+            config['targets'] = {
+                'subreddits': [],
+                'users': [{'name': target_name, 'limit': limit}]
+            }
+        else:
+            config['targets'] = {
+                'subreddits': [{'name': target_name, 'limit': limit, 'sort': 'new'}],
+                'users': []
+            }
+
+        config['download']['media_types'] = media_types
+
+        # Write temporary config
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp:
+            yaml.dump(config, tmp)
+            tmp_config_path = tmp.name
+
+        try:
+            result = subprocess.run(
+                ["python3", "-m", "src.main", "-c", tmp_config_path],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=7200  # 2 hours max for individual
+            )
+
+            # Parse stats from output
+            if result.stdout:
+                processed_match = re.search(r'Posts processed:\s*(\d+)', result.stdout)
+                downloaded_match = re.search(r'New downloads:\s*(\d+)', result.stdout)
+                if processed_match:
+                    posts_processed = int(processed_match.group(1))
+                if downloaded_match:
+                    posts_downloaded = int(downloaded_match.group(1))
+
+            if result.returncode == 0:
+                collector_status["last_result"] = "success"
+                db.finish_scheduler_run(run_id, "success", posts_processed, posts_downloaded)
+            else:
+                collector_status["last_result"] = "error"
+                db.finish_scheduler_run(run_id, "error", posts_processed, posts_downloaded, result.stderr[:500] if result.stderr else None)
+        finally:
+            # Clean up temp file
+            import os
+            os.unlink(tmp_config_path)
+
+    except subprocess.TimeoutExpired:
+        collector_status["last_result"] = "timeout"
+        db.finish_scheduler_run(run_id, "timeout", posts_processed, posts_downloaded, "Execution timed out")
+    except Exception as e:
+        collector_status["last_result"] = f"error: {str(e)}"
+        db.finish_scheduler_run(run_id, "error", posts_processed, posts_downloaded, str(e)[:500])
+    finally:
+        collector_status["running"] = False
+
+
+@app.post("/api/collect/individual")
+async def collect_individual(request: IndividualCollectRequest, background_tasks: BackgroundTasks):
+    """Run collection for a single user or subreddit."""
+    if collector_status["running"]:
+        raise HTTPException(status_code=409, detail="Collector is already running")
+
+    if request.target_type not in ['user', 'subreddit']:
+        raise HTTPException(status_code=400, detail="target_type must be 'user' or 'subreddit'")
+
+    if not request.target_name:
+        raise HTTPException(status_code=400, detail="target_name is required")
+
+    valid_types = ['image', 'video', 'gif']
+    for mt in request.media_types:
+        if mt not in valid_types:
+            raise HTTPException(status_code=400, detail=f"Invalid media type: {mt}")
+
+    background_tasks.add_task(
+        run_individual_collection,
+        request.target_type,
+        request.target_name,
+        request.media_types,
+        request.limit
+    )
+
+    return {
+        "message": f"Collection started for {request.target_type} '{request.target_name}'",
+        "media_types": request.media_types,
+        "limit": request.limit
+    }
+
+
+@app.get("/api/collect/targets")
+async def get_collection_targets():
+    """Get available targets for individual collection (favorite authors and configured sources)."""
+    db = Database()
+
+    # Get favorite authors
+    favorite_authors = db.get_favorite_authors()
+
+    # Get configured subreddits and users from config
+    subreddits = config_manager.get_subreddits()
+    users = config_manager.get_users()
+
+    return {
+        "favorite_authors": favorite_authors,
+        "configured_subreddits": [s['name'] for s in subreddits],
+        "configured_users": [u['name'] for u in users]
+    }
 
 
 # Favorites endpoints
